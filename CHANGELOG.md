@@ -7,6 +7,12 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+- Live re-proof 2026-09-09 (post repro-pinning: hub `b730266` / spi
+  `66cdb52` / bridge `0bcd2f9` / example1 `ca7e5e2` / minimap `df1383e`,
+  host OpenJDK 1.8.0_502): 150s 1614 server run, `PackWire.bind` clean,
+  world == pure union (256 cells, stone only). Replay: `sh
+  tools/run-live.sh` (manual `live-proof` workflow, needs the 1614 SRG
+  cache); last green proof recorded in hub `STATE.md`.
 - Repro: live-runner base image pinned by digest
   (`eclipse-temurin:8-jdk-jammy@sha256:0d568cc4…cd9ed0c`); provisioned ASM
   5.0.3 pinned by sha1 (any drift fails loudly, never silently).

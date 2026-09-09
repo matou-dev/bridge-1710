@@ -1,0 +1,54 @@
+# Manual live proof (B3): full Forge 1.7.10-1614 server run + world==union.
+#
+# Manual-only, never blocking: needs network once + the 1614 SRG_MCP cache
+# (ForgeGradle path under $HOME, or the SRG_MCP env mount). Without the SRG
+# file tools/run-live.sh refuses loudly with the remediation — a loud red
+# dispatch without cache is the designed behavior, never a silent skip.
+# Green runs on github-hosted runners need a pre-provisioned cache; the
+# reference path stays local (bridge README) or the pinned live image
+# (tools/live/Dockerfile). Last green proof: hub STATE.md.
+#
+# Actions pinned by SHA 2026-09-09 (tags v4); Dependabot keeps them fresh.
+name: live-proof
+on:
+  workflow_dispatch:
+    inputs:
+      boot_secs:
+        description: "Server run time (short runs fail coverage loudly)"
+        default: "150"
+      offline:
+        description: "Reuse cache, never download"
+        type: boolean
+        default: false
+jobs:
+  live:
+    runs-on: ubuntu-24.04
+    steps:
+      # Sibling layout (cf. hub README): run-live.sh proves against
+      # ../spi, ../example1 and ../minimap checkouts.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: bridge-1710
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: matou-dev/spi
+          path: spi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: matou-dev/example1
+          path: example1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: matou-dev/minimap
+          path: minimap
+      # Live path needs a real JDK 8 (javac -source 8 + server runtime),
+      # not the modern javac that tools/check.sh stage 1 requires.
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '8'
+      - run: |
+          export JAVA8_HOME="$JAVA_HOME"
+          export BOOT_SECS="${{ inputs.boot_secs }}"
+          if [ "${{ inputs.offline }}" = "true" ]; then export B3_OFFLINE=1; fi
+          sh bridge-1710/tools/run-live.sh
