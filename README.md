@@ -83,7 +83,7 @@ fixed by the reobf step, not by source changes (the sources were valid
   pinned ASM (`asm-all-5.0.3.jar`); any upstream drift fails loudly.
 - Cache: server provisioned once under `B3_DIR` (idempotent);
   `B3_OFFLINE=1` reuses the cache and never downloads.
-- Docker: `tools/live/Dockerfile` (JDK 8 + python3 + curl) reproduces the
+- Docker: `tools/live/Dockerfile` (JDK 8 + python3 + curl + git) reproduces the
   runner without installing Java 8 on the host. The image runs as a
   non-root `builder` user — build with
   `--build-arg UID=$(id -u) --build-arg GID=$(id -g)` so bind-mounted

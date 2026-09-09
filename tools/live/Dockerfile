@@ -28,11 +28,12 @@
 # Pre-R3 root-owned `build/` leftovers in an old cache must be cleared once
 # (rm or fresh B3_DIR): run-live.sh refuses to build over them loudly.
 #
-# No machine paths inside the image: Java 8 + python3 + curl only.
+# No machine paths inside the image: Java 8 + python3 + curl + git only
+# (git serves the R2 release guards: VERSION + clean-tree checks).
 # Pins and SRG auto-discover live in tools/run-live.sh, not here.
 FROM eclipse-temurin:8-jdk-jammy
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 curl ca-certificates \
+ && apt-get install -y --no-install-recommends python3 curl ca-certificates git \
  && rm -rf /var/lib/apt/lists
 ENV JAVA8_HOME=/opt/java/openjdk
 ARG UID=1000
