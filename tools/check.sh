@@ -1,8 +1,10 @@
 #!/bin/sh
-# Gate bridge-1710 : anti-contamination + skeleton pur + forge isole.
+# Gate bridge-1710 : anti-contamination + skeleton pur + forge isole + live.
 # Etage 1 (toujours vert, sans MC) : zero-MC sur java/ + compile contre le
 # sibling ../spi + BridgeCheck. Etage 2 (Forge) : compile forge/ contre
-# MC 1.7.10 quand MC_JAR est fourni, skip sinon. Jamais de chemin machine
+# MC 1.7.10 quand MC_JAR est fourni, skip sinon. Etage 3 (live, R1) :
+# LIVE=1 runs tools/run-live.sh (needs Java 8 + 1614 SRG + network once,
+# B3_OFFLINE=1 reuses cache), skip otherwise. Jamais de chemin machine
 # en dur ici : l'env pertinent s'exporte (ex. MC_JAR=<minecraft>.jar).
 set -eu
 cd "$(dirname "$0")/.."
@@ -39,9 +41,16 @@ java -cp java/build fr.iamacat.bridge.ForgeContentCheck
 # Etage 2 : forge/ seul touche MC (Forge 10.13.4.1614). Sans MC_JAR : skip.
 if [ -z "${MC_JAR:-}" ]; then
   echo "skip forge (no MC_JAR)"
+else
+  [ -f "$MC_JAR" ] || { echo "FAIL forge : MC_JAR=<$MC_JAR> missing"; exit 1; }
+  mkdir -p forge/build
+  javac --release 8 -cp "java/build:$MC_JAR" -d forge/build $(find forge/src -name '*.java')
+  echo "ok (forge-1614)"
+fi
+# Etage 3 (R1) : live opt-in. Default skip keeps CI green without
+# network/Java 8/SRG; LIVE=1 fails loudly without them, never silently.
+if [ "${LIVE:-}" != "1" ]; then
+  echo "skip live (LIVE!=1)"
   exit 0
 fi
-[ -f "$MC_JAR" ] || { echo "FAIL forge : MC_JAR=<$MC_JAR> missing"; exit 1; }
-mkdir -p forge/build
-javac --release 8 -cp "java/build:$MC_JAR" -d forge/build $(find forge/src -name '*.java')
-echo "ok (forge-1614)"
+exec sh tools/run-live.sh

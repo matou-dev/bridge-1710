@@ -55,8 +55,9 @@ jamais en dur).
 Etage 2 compiles; only the game arbitrates runtime. B3 runs a real
 1614 dedicated server with the built jars and compares the world against
 the pure decision union — see `tools/run-live.sh` (manual gate, needs
-network + Java 8; env-driven, no machine paths: `SRG_MCP` points at the
-1614 `srg-mcp.srg`, `B3_DIR`/`JAVA8_HOME`/`BOOT_SECS` optional).
+network once + Java 8; env-driven, no machine paths: `B3_DIR` /
+`JAVA8_HOME` / `BOOT_SECS` optional, `SRG_MCP` auto-discovers the
+ForgeGradle 1614 cache under `$HOME` unless overridden).
 
 - `forge/` compiles against pinned stubs (`tools/live/stub/`): every
   stubbed vanilla member is asserted in the exact SRG used for reobf,
@@ -74,3 +75,15 @@ etage 2 could never see — `Block.getBlockFromName` and `World.provider`
 left un-remapped (`NoSuchMethodError`/`NoSuchFieldError` at init/tick),
 fixed by the reobf step, not by source changes (the sources were valid
 1.7.10 MCP all along).
+
+## R1 live reproducibility
+
+- Pins: installer / universal / `srg-mcp.srg` sha1 verified on every run,
+  pinned ASM (`asm-all-5.0.3.jar`); any upstream drift fails loudly.
+- Cache: server provisioned once under `B3_DIR` (idempotent);
+  `B3_OFFLINE=1` reuses the cache and never downloads.
+- Docker: `tools/live/Dockerfile` (JDK 8 + python3 + curl) reproduces the
+  runner without installing Java 8 on the host.
+- Opt-in gate: `LIVE=1 ./tools/check.sh` runs the live proof after etages
+  1-2; default stays green without network / Java 8 / SRG (same skip
+  pattern as `MC_JAR`).
