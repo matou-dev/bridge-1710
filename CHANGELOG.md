@@ -7,6 +7,17 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-09
+
+Versioned server drop: https://github.com/matou-dev/bridge-1710/releases/tag/v1.2.0
+
+- Unified v1.2.0 round over `matou-spi` `3e819a9` (shared authoring
+  surface: `Cell` + `Counts` + typed `Snapshot` + `Packs.loadConfigured`,
+  additive only, merge comparateur still green — no live re-proof,
+  decided bytes identical, gates lock them).
+- Dev-client helpers as thin wrappers over hub `tools/run-client.sh`
+  (experimental, 1165-proven only).
+
 ## [1.1.0] - 2026-09-09
 
 Versioned server drop: https://github.com/matou-dev/bridge-1710/releases/tag/v1.1.0

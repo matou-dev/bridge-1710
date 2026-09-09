@@ -23,7 +23,7 @@ import java.util.List;
  * <p>Only this package may import {@code net.minecraft} / {@code cpw.mods};
  * the pure gate ({@code tools/check.sh} etage 1) fails otherwise.
  */
-@Mod(modid = MatouBridgeMod.MODID, name = "MatouBridge", version = "1.1.0",
+@Mod(modid = MatouBridgeMod.MODID, name = "MatouBridge", version = "1.2.0",
         acceptableRemoteVersions = "*")
 public final class MatouBridgeMod {
     public static final String MODID = "matoubridge";
