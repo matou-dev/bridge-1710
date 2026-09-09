@@ -7,6 +7,10 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-09
+
+Versioned server drop: https://github.com/matou-dev/bridge-1710/releases/tag/v1.1.0
+
 - Shared apply seam moved up to `matou-spi` v1.1.0 at identical FQNs:
   `java/src/fr.iamacat/bridge` (6 files) and `BridgeCheck` deleted here,
   consumed from the `../spi` sibling (already on the gate classpath).
@@ -25,7 +29,10 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
   x,z=17). Plane cells map at the wire y, volume cells at their own y;
   stone-only still holds.
 
-- 3D landing for V3 structure cells: `CellSink.setBlock` (default refuses
+- `run-live.sh` drops the `java/src` build stage (pure seam ships from
+  `matou-spi` v1.1.0 since the seam move; only the Forge side builds here),
+  mirroring `bridge-1122`.
+- 3D landing for V3 structure cells:`CellSink.setBlock` (default refuses
   loudly so 2D-only sinks never swallow volumes), `ForgeCells`
   shape-dispatch in `applyCells` (`:` = volume, else plane, both loud on
   bad shape), `WorldCellSink` override (own y range-checked, block
