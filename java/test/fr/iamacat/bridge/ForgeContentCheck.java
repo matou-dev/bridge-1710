@@ -171,7 +171,7 @@ public final class ForgeContentCheck {
             }
         }, "negative tick");
 
-        // --- wired pack: legacy decisions first, 18 volume cells after ---
+        // --- wired pack: legacy decisions first, 52 volume cells after ---
         final ExamplePack wired = ExamplePack.fromFiles(
                 "../example1/content/owned.matou",
                 "../example1/content/additive.matou",
@@ -187,7 +187,7 @@ public final class ForgeContentCheck {
                 vols++;
             }
         }
-        check(vols == 18, "wired 18 volume cells");
+        check(vols == 2 * (8 + 18), "wired 52 volume cells");
         final List<String> landedW = new ArrayList<String>();
         final CellSink legacySink = new CellSink() {
             public void setCell(int x, int z) {

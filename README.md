@@ -72,9 +72,12 @@ ForgeGradle 1614 cache under `$HOME` unless overridden).
 - The bridge jar is reobfuscated MCP→SRG (`tools/live/Reobf.java`, the
   ForgeGradle `reobf` equivalent): runtime vanilla only declares SRG
   names, so an un-reobfed jar dies linking.
-- Verdict: boot with zero `NoSuch*`/`E_*` refusals, then chunk (0,0) at
-  the wired y must equal the pure `ForgeContent.decideAll` union —
-  stone only, nothing foreign, nothing missing (`tools/live/anvil.py`).
+- Verdict: boot with zero `NoSuch*`/`E_*` refusals, then chunks (0..1, -1..1)
+  at y=63..65 must equal the pure `ForgeContent.decideAll` union over the
+  live `packs.cfg` — plane cells at the wire y=63, volume cells at their
+  own y=64..65 (separate slices keep the verdict per-shape sensitive) —
+  stone only, nothing foreign, nothing missing (`tools/live/anvil.py`
+  + `CellUnion`).
 
 Live already paid for itself: the first B3 run caught two linkage bugs
 stage 2 could never see — `Block.getBlockFromName` and `World.provider`

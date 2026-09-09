@@ -7,6 +7,13 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+- Live wires the composite `hut` (structureFile + `block.*` stone aliases
+  in `packs.cfg`): `CellUnion` now replays the live `packs.cfg` wire
+  (reflective load, same configure path as `PackWire.bind`) and the
+  verdict reads chunks (0..1, 0..1) at y=64..65 (structure offsets reach
+  x,z=17). Plane cells map at the wire y, volume cells at their own y;
+  stone-only still holds.
+
 - 3D landing for V3 structure cells: `CellSink.setBlock` (default refuses
   loudly so 2D-only sinks never swallow volumes), `ForgeCells`
   shape-dispatch in `applyCells` (`:` = volume, else plane, both loud on

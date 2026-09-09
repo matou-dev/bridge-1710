@@ -241,7 +241,7 @@ if [ "${BUILD_ONLY:-}" = "1" ]; then
   cp "$BLD/jars/matou-minimap.jar" "dist/matou-minimap-$VERSION.jar"
   cp "$BLD/jars/matoubridge-reobf.jar" "dist/matoubridge-$VERSION.jar"
   cp ../example1/content/owned.matou ../example1/content/additive.matou ../example1/content/structure.matou dist/matou-content/
-  printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\nfr.iamacat.example1.ExamplePack 64 minecraft:stone ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou\n# Optional structure job (x,y,z:block cells land at their own y; every palette block must resolve vanilla-side):\n# fr.iamacat.example1.ExamplePack 64 minecraft:stone ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou structureFile=<SERVER>/matou-content/structure.matou\n' > dist/packs.cfg.example
+  printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\n# Wire y=63 keeps plane cells on their own slice, off the structure slices (64..65).\nfr.iamacat.example1.ExamplePack 63 minecraft:stone ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou structureFile=<SERVER>/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone\n' > dist/packs.cfg.example
   (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou matou-content/structure.matou packs.cfg.example > SHA256SUMS.txt)
   (cd dist && sha256sum -c SHA256SUMS.txt)
   echo "ok r2-release : dist/ assembled (VERSION=$VERSION)"
@@ -254,7 +254,10 @@ rm -f "$SERV/mods/"*.jar
 cp "$BLD/jars/matou-spi.jar" "$BLD/jars/matou-example1.jar" "$BLD/jars/matoubridge-reobf.jar" "$SERV/mods/"
 mv "$SERV/mods/matoubridge-reobf.jar" "$SERV/mods/matoubridge.jar"
 rm -rf "$SERV/matou-content" && cp -r ../example1/content "$SERV/matou-content"
-printf 'fr.iamacat.example1.ExamplePack 64 minecraft:stone ownedFile=%s/matou-content/owned.matou scatterFile=%s/matou-content/additive.matou\n' "$SERV" "$SERV" > "$SERV/config/matoubridge/packs.cfg"
+# Wire y=63: plane cells stay on their own slice, off the structure
+# slices (64..65), so the verdict stays per-shape sensitive despite the
+# set collapse (a 2D and a 3D cell can share x,z, never y).
+printf 'fr.iamacat.example1.ExamplePack 63 minecraft:stone ownedFile=%s/matou-content/owned.matou scatterFile=%s/matou-content/additive.matou structureFile=%s/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone\n' "$SERV" "$SERV" "$SERV" > "$SERV/config/matoubridge/packs.cfg"
 echo "eula=true" > "$SERV/eula.txt"
 printf 'online-mode=false\nlevel-type=FLAT\ngamemode=1\ndifficulty=0\nmotd=B3 live proof\nmax-tick-time=-1\n' > "$SERV/server.properties"
 rm -rf "$SERV/world" "$SERV/logs"
@@ -275,19 +278,50 @@ grep -a -q "matoubridge" "$SERV/boot-b3.log" \
   || { echo "FAIL b3-live : mod never loaded"; exit 1; }
 echo "ok b3-live : bind clean, ticks clean"
 
-# 7. Positive proof: world blocks at y=64 in chunk 0,0 must equal the pure
-#    decision union — stone only, nothing foreign, nothing missing.
+# 7. Positive proof: world blocks in chunks (0..1, -1..1) at y=63..65 must
+#    equal the pure decision union — stone only, nothing foreign, nothing
+#    missing. Plane cells land at the wire y=63, volume cells at their own
+#    y=64..65; structure offsets reach x,z=17, and the hut anchor z=-4
+#    spills into chunk row -1 (region r.0.-1.mca) — hence the 6-chunk,
+#    3-slice read.
 "$J8/javac" -cp "$BLD/spi:$BLD/ex1:$BLD/bridge" -d "$BLD" tools/live/CellUnion.java
 "$J8/java" -cp "$BLD:$BLD/spi:$BLD/ex1:$BLD/bridge" CellUnion \
-  "$SERV/matou-content/owned.matou" "$SERV/matou-content/additive.matou" 4000 "$BLD/union.txt"
-python3 tools/live/anvil.py "$SERV/world/region/r.0.0.mca" 0 0 64 > "$BLD/world64.txt"
-python3 - "$BLD/union.txt" "$BLD/world64.txt" <<'EOF'
+  "$SERV/config/matoubridge/packs.cfg" 4000 "$BLD/union.txt"
+: > "$BLD/world.txt"
+for spec in "r.0.0.mca 0 0" "r.0.0.mca 1 0" "r.0.0.mca 0 1" \
+    "r.0.0.mca 1 1" "r.0.-1.mca 0 -1" "r.0.-1.mca 1 -1"; do
+  set -- $spec
+  for y in 63 64 65; do
+    python3 tools/live/anvil.py "$SERV/world/region/$1" "$2" "$3" "$y" \
+      | awk -v cx="$2" -v cz="$3" -v y="$y" \
+        '{split($1, a, ","); print (cx*16+a[1])" "y" "(cz*16+a[2])" "$2}' \
+      >> "$BLD/world.txt"
+  done
+done
+python3 - "$BLD/union.txt" "$BLD/world.txt" "$SERV/config/matoubridge/packs.cfg" <<'EOF'
 import sys
-u = {l.split()[0] for l in open(sys.argv[1])}
+wire_y = None
+for line in open(sys.argv[3]):
+    line = line.strip()
+    if line and not line.startswith("#"):
+        wire_y = int(line.split()[1])
+if wire_y is None:
+    print("FAIL b3-live : no wire in packs.cfg")
+    sys.exit(1)
+u = set()
+for line in open(sys.argv[1]):
+    cell = line.split()[0]
+    if ":" in cell:
+        x, rest = cell.split(",", 1)
+        y, z = rest.split(",", 1)[0], rest.split(",", 1)[1].split(":")[0]
+        u.add((int(x), int(y), int(z)))
+    else:
+        x, z = cell.split(",")
+        u.add((int(x), wire_y, int(z)))
 rows = [l.split() for l in open(sys.argv[2])]
-w = {c: i for c, i in rows}
+w = {(int(x), int(y), int(z)): i for x, y, z, i in rows}
 if not w:
-    print("FAIL b3-live : world empty at y=64 (no tick applied?)")
+    print("FAIL b3-live : world empty at y=63..65 (no tick applied?)")
     sys.exit(1)
 if set(w.values()) != {"1"}:
     print("FAIL b3-live : foreign block ids %s" % sorted(set(w.values())))
