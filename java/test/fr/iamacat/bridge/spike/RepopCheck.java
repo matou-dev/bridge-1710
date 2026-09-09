@@ -50,10 +50,7 @@ public final class RepopCheck {
     }
 
     private static Snapshot seal(MinedStore store, long tick, long delay) {
-        Map<MatouId, Object> states = new HashMap<MatouId, Object>();
-        states.put(RepopJob.MINED, store.sealed());
-        states.put(RepopJob.DELAY, delay);
-        return ForgeSnapshot.snapshot(tick, states);
+        return ForgeSnapshot.snapshot(tick, RepopSeal.seal(store, delay));
     }
 
     private static MinedStore seeded() {
@@ -133,6 +130,30 @@ public final class RepopCheck {
         expectNPE(new Runnable() {
             @Override public void run() { job.decide(null); }
         }, "null snapshot");
+
+        // Seal: contents, copy isolation, refusals (the helper above
+        // routes through the shipped RepopSeal, so every assertion below
+        // exercises the live path).
+        Map<MatouId, Object> st = RepopSeal.seal(seeded(), 10L);
+        check(st.get(RepopJob.MINED) instanceof Map,
+                "seal carries spike:mined");
+        check(Long.valueOf(10L).equals(st.get(RepopJob.DELAY)),
+                "seal carries spike:delay");
+        check(((Map<?, ?>) st.get(RepopJob.MINED)).size() == 3,
+                "seal carries every mined cell");
+        MinedStore iso = new MinedStore();
+        iso.record("1,2,3:minecraft:stone", 5L);
+        Map<MatouId, Object> snap0 = RepopSeal.seal(iso, 7L);
+        iso.record("9,9,9:minecraft:stone", 6L);
+        check(((Map<?, ?>) snap0.get(RepopJob.MINED)).size() == 1,
+                "sealed mined is a copy, later records never leak");
+        final MinedStore nullStore = null;
+        expectNPE(new Runnable() {
+            @Override public void run() { RepopSeal.seal(nullStore, 0L); }
+        }, "null store");
+        expectIAE(new Runnable() {
+            @Override public void run() { RepopSeal.seal(seeded(), -1L); }
+        }, "negative seal delay");
 
         // Comparateur: store claim and job decision are equal tick by
         // tick over the same sealed states (same order, same boundary).

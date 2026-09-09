@@ -9,6 +9,7 @@ import net.minecraft.block.Block;
  */
 public class World {
     public WorldProvider provider;
+    public boolean isRemote;
 
     public boolean setBlock(int x, int y, int z, Block block) {
         return false;

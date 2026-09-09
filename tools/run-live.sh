@@ -83,6 +83,7 @@ pin_method "net/minecraft/block/Block/getBlockFromName" "(Ljava/lang/String;)Lne
 pin_method "net/minecraft/world/World/setBlock" "(IIILnet/minecraft/block/Block;)Z"
 pin_field "net/minecraft/world/World/provider"
 pin_field "net/minecraft/world/WorldProvider/dimensionId"
+pin_field "net/minecraft/world/World/isRemote"
 echo "ok b3-live : stubs pinned to SRG"
 
 # 2. Provision the 1614 server once (idempotent, checksum-verified).
@@ -147,6 +148,13 @@ pin_uni 'cpw.mods.fml.relauncher.Side' 'SERVER'
 pin_uni 'cpw.mods.fml.common.Mod' 'modid()'
 pin_uni 'cpw.mods.fml.common.FMLCommonHandler' 'instance()'
 pin_uni 'cpw.mods.fml.common.eventhandler.EventBus' 'register('
+pin_uni 'net.minecraftforge.common.MinecraftForge' 'EVENT_BUS'
+pin_uni 'net.minecraftforge.event.world.BlockEvent' 'public final int x;'
+pin_uni 'net.minecraftforge.event.world.BlockEvent' 'public final int y;'
+pin_uni 'net.minecraftforge.event.world.BlockEvent' 'public final int z;'
+pin_uni 'net.minecraftforge.event.world.BlockEvent' ' world;'
+pin_uni 'net.minecraftforge.event.world.BlockEvent' ' block;'
+pin_uni 'net.minecraftforge.event.world.BlockEvent$BreakEvent' 'BreakEvent('
 echo "ok b3-live : forge stubs pinned to universal"
 
 # 3. Build all mod jars with Java 8. forge/ compiles against the pinned
@@ -155,8 +163,9 @@ echo "ok b3-live : forge stubs pinned to universal"
 #    commit + same toolchain == same bytes, see normjar), manifests carry
 #    VERSION, the bridge jar embeds mcmod.info.
 #    These are the exact bytes the live run proves AND the release ships.
-#    (No java/ stage: the pure seam ships from matou-spi, this repo carries
-#    only its Forge side.)
+#    The repop spike stage (java/src: bridge-owned MinedStore + pure
+#    RepopJob + RepopSeal) compiles into the forge classes dir so the hook
+#    links — java/test never ships (etage-1 gate only).
 BLD="$B3_DIR/build"
 rm -rf "$BLD" \
   || { echo "FAIL b3-live : cannot clear <$BLD> (root-owned docker leftovers? point B3_DIR at a user-owned dir)"; exit 1; }
@@ -164,7 +173,7 @@ mkdir -p "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/forge" "$BLD/jars"
 "$J8/javac" -source 8 -target 8 -nowarn -d "$BLD/spi" $(find ../spi/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/ex1" $(find ../example1/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/mini" $(find ../minimap/java/src -name '*.java')
-"$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi:$BLD/ex1" -d "$BLD/forge" $(find tools/live/stub forge/src -name '*.java')
+"$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi:$BLD/ex1" -d "$BLD/forge" $(find java/src tools/live/stub forge/src -name '*.java')
 EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
 printf 'Manifest-Version: 1.0\nImplementation-Version: %s\n' "$VERSION" > "$BLD/MANIFEST.MF"
 cat > "$BLD/mcmod.info" <<EOF
