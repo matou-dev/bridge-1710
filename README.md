@@ -49,3 +49,28 @@ jamais en dur).
 - Étage 2 = preuve de compilation contre Forge 1614 (le runtime MC hors
   jeu manque de classpath : Guava... ; le comportement live se prouve en
   jeu, pas ici).
+
+## B3 live proof (Forge 1614 server run)
+
+Etage 2 compiles; only the game arbitrates runtime. B3 runs a real
+1614 dedicated server with the built jars and compares the world against
+the pure decision union — see `tools/run-live.sh` (manual gate, needs
+network + Java 8; env-driven, no machine paths: `SRG_MCP` points at the
+1614 `srg-mcp.srg`, `B3_DIR`/`JAVA8_HOME`/`BOOT_SECS` optional).
+
+- `forge/` compiles against pinned stubs (`tools/live/stub/`): every
+  stubbed vanilla member is asserted in the exact SRG used for reobf,
+  every stubbed Forge member in the provisioned universal jar. Stub
+  drift fails loudly; stubs never ship (leak check before jarring).
+- The bridge jar is reobfuscated MCP→SRG (`tools/live/Reobf.java`, the
+  ForgeGradle `reobf` equivalent): runtime vanilla only declares SRG
+  names, so an un-reobfed jar dies linking.
+- Verdict: boot with zero `NoSuch*`/`E_*` refusals, then chunk (0,0) at
+  the wired y must equal the pure `ForgeContent.decideAll` union —
+  stone only, nothing foreign, nothing missing (`tools/live/anvil.py`).
+
+Live already paid for itself: the first B3 run caught two linkage bugs
+etage 2 could never see — `Block.getBlockFromName` and `World.provider`
+left un-remapped (`NoSuchMethodError`/`NoSuchFieldError` at init/tick),
+fixed by the reobf step, not by source changes (the sources were valid
+1.7.10 MCP all along).
