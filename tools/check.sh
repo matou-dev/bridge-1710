@@ -1,5 +1,9 @@
 #!/bin/sh
-# Gate anti-contamination : le bridge ne réimporte jamais l'ancienne lib.
+# Gate bridge-1710 : anti-contamination + skeleton pur + forge isole.
+# Etage 1 (toujours vert, sans MC) : zero-MC sur java/ + compile contre le
+# sibling ../spi + BridgeCheck. Etage 2 (Forge) : compile forge/ contre
+# MC 1.7.10 quand MC_JAR est fourni, skip sinon. Jamais de chemin machine
+# en dur ici : l'env pertinent s'exporte (ex. MC_JAR=<minecraft>.jar).
 set -eu
 cd "$(dirname "$0")/.."
 hits=$(rg -n --no-heading "fr\.iamacat\.matoulib" \
@@ -10,6 +14,16 @@ if [ -n "$hits" ]; then
   exit 1
 fi
 echo "ok (no-legacy-matoulib)"
+# Etage 1 : java/ pur ne touche jamais net.minecraft / cpw.mods.
+# Seuls les imports comptent : les commentaires peuvent les nommer.
+mc_hits=$(rg -n --no-heading "^\s*import\s+(net\.minecraft|cpw\.mods)" \
+  java --glob '!build/**' || true)
+if [ -n "$mc_hits" ]; then
+  echo "FAIL zero-mc-bridge :"
+  echo "$mc_hits"
+  exit 1
+fi
+echo "ok (zero-mc-bridge)"
 # M1 walking-skeleton gate : compile contre le checkout sibling ../spi
 # (convention siblings, cf. hub README). Refus bruyant si absent.
 SPI=../spi/java/src
@@ -18,3 +32,12 @@ mkdir -p java/build
 javac --release 8 -d java/build $(find "$SPI" java/src -name '*.java')
 javac --release 8 -cp java/build -d java/build $(find java/test -name '*.java')
 java -cp java/build fr.iamacat.bridge.BridgeCheck
+# Etage 2 : forge/ seul touche MC (Forge 10.13.4.1614). Sans MC_JAR : skip.
+if [ -z "${MC_JAR:-}" ]; then
+  echo "skip forge (no MC_JAR)"
+  exit 0
+fi
+[ -f "$MC_JAR" ] || { echo "FAIL forge : MC_JAR=<$MC_JAR> missing"; exit 1; }
+mkdir -p forge/build
+javac --release 8 -cp "java/build:$MC_JAR" -d forge/build $(find forge/src -name '*.java')
+echo "ok (forge-1614)"
