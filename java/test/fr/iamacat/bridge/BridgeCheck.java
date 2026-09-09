@@ -108,6 +108,61 @@ public final class BridgeCheck {
             System.out.println("ok bridge-forge : null entry refused (" + e.getMessage() + ")");
         }
 
+        ForgeCells.BlockCell vol = ForgeCells.parseBlockCell(
+                "3,65,4:minecraft:stone");
+        if (vol.x != 3 || vol.y != 65 || vol.z != 4
+                || !vol.block.equals("minecraft:stone")) {
+            System.out.println("FAIL bridge-forge : parseBlockCell=3,65,4");
+            System.exit(1);
+        }
+        System.out.println("ok bridge-forge : parseBlockCell");
+        for (String bad : new String[]{"3,65", "a,65,4:minecraft:stone",
+                "3,65,4:", "3,65,4", "1,2,3,4:minecraft:stone"}) {
+            try {
+                ForgeCells.parseBlockCell(bad);
+                System.out.println("FAIL bridge-forge : parseBlockCell <" + bad + ">");
+                System.exit(1);
+            } catch (IllegalArgumentException e) {
+                System.out.println("ok bridge-forge : refused <" + bad + "> (" + e.getMessage() + ")");
+            }
+        }
+        try {
+            ForgeCells.parseBlockCell(null);
+            System.out.println("FAIL bridge-forge : parseBlockCell null");
+            System.exit(1);
+        } catch (NullPointerException e) {
+            System.out.println("ok bridge-forge : null refused (" + e.getMessage() + ")");
+        }
+
+        final List<String> landed3d = new ArrayList<String>();
+        CellSink rec3d = new CellSink() {
+            public void setCell(int x, int z) {
+                landed3d.add(x + "," + z);
+            }
+            @Override
+            public void setBlock(int x, int y, int z, String block) {
+                landed3d.add(x + "," + y + "," + z + ":" + block);
+            }
+        };
+        List<String> mixed = new ArrayList<String>();
+        mixed.add("1,2");
+        mixed.add("3,65,4:minecraft:stone");
+        ForgeCells.applyCells(mixed, rec3d);
+        if (!landed3d.toString().equals("[1,2, 3,65,4:minecraft:stone]")) {
+            System.out.println("FAIL bridge-forge : landed3d=" + landed3d);
+            System.exit(1);
+        }
+        System.out.println("ok bridge-forge : mixed apply dispatch");
+        try {
+            List<String> volOnly = new ArrayList<String>();
+            volOnly.add("3,65,4:minecraft:stone");
+            ForgeCells.applyCells(volOnly, rec);
+            System.out.println("FAIL bridge-forge : 2d sink swallows 3d");
+            System.exit(1);
+        } catch (UnsupportedOperationException e) {
+            System.out.println("ok bridge-forge : 2d sink refuses 3d (" + e.getMessage() + ")");
+        }
+
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>();
         states.put(MatouId.parse("matou:tick"), Long.valueOf(9L));
         Snapshot sealed = ForgeSnapshot.snapshot(9L, states);

@@ -7,6 +7,17 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+- 3D landing for V3 structure cells: `CellSink.setBlock` (default refuses
+  loudly so 2D-only sinks never swallow volumes), `ForgeCells`
+  shape-dispatch in `applyCells` (`:` = volume, else plane, both loud on
+  bad shape), `WorldCellSink` override (own y range-checked, block
+  resolved by name and cached, unknown refused as `E_FORGE_BLOCK`).
+  Forge code uses only already-stubbed members (stubs untouched) and
+  compiles against `tools/live/stub`. Release dist now ships
+  `structure.matou` (+ SHA) with a commented `structureFile` example;
+  live `packs.cfg` stays 2-file until a palette maps to vanilla blocks
+  (example1's `hut_wall` would refuse loudly live — by design, follow-up).
+
 - Dual-runtime contract: shipped jars must stay Java 8 bytecode (major 52,
   no `module-info`, no multi-release) — enforced by `run-live.sh` on live
   and release runs; README documents the Java 8 vanilla / 17-21 lwjgl3ify

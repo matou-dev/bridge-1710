@@ -53,6 +53,18 @@ public final class ForgeContentCheck {
         System.exit(1);
     }
 
+    private static void expectUOE(Runnable r, String what) {
+        try {
+            r.run();
+        } catch (UnsupportedOperationException e) {
+            System.out.println("ok bridge-content : refused " + what
+                    + " (" + e.getMessage() + ")");
+            return;
+        }
+        System.out.println("FAIL bridge-content : accepted " + what);
+        System.exit(1);
+    }
+
     public static void main(String[] args) {
         // --- reflective loader: content-blind at build time ---
         ContentPack pack = Packs.load("fr.iamacat.example1.ExamplePack");
@@ -158,6 +170,35 @@ public final class ForgeContentCheck {
                 ForgeContent.decideAll(ex, -1L);
             }
         }, "negative tick");
+
+        // --- wired pack: legacy decisions first, 18 volume cells after ---
+        final ExamplePack wired = ExamplePack.fromFiles(
+                "../example1/content/owned.matou",
+                "../example1/content/additive.matou",
+                "../example1/content/structure.matou");
+        final List<String> w1 = ForgeContent.decideAll(wired, 7L);
+        check(w1.equals(ForgeContent.decideAll(wired, 7L)),
+                "wired e2e pure");
+        check(w1.subList(0, d1.size()).equals(d1),
+                "wired keeps legacy first");
+        int vols = 0;
+        for (String c : w1) {
+            if (c.indexOf(':') >= 0) {
+                vols++;
+            }
+        }
+        check(vols == 18, "wired 18 volume cells");
+        final List<String> landedW = new ArrayList<String>();
+        final CellSink legacySink = new CellSink() {
+            public void setCell(int x, int z) {
+                landedW.add(x + "," + z);
+            }
+        };
+        expectUOE(new Runnable() {
+            public void run() {
+                ForgeContent.applyAll(wired, 7L, legacySink);
+            }
+        }, "2d sink on wired pack");
 
         System.out.println("ok bridge-content : all");
     }

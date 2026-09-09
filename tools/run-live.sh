@@ -240,9 +240,9 @@ if [ "${BUILD_ONLY:-}" = "1" ]; then
   cp "$BLD/jars/matou-example1.jar" "dist/matou-example1-$VERSION.jar"
   cp "$BLD/jars/matou-minimap.jar" "dist/matou-minimap-$VERSION.jar"
   cp "$BLD/jars/matoubridge-reobf.jar" "dist/matoubridge-$VERSION.jar"
-  cp ../example1/content/owned.matou ../example1/content/additive.matou dist/matou-content/
-  printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\nfr.iamacat.example1.ExamplePack 64 minecraft:stone ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou\n' > dist/packs.cfg.example
-  (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou packs.cfg.example > SHA256SUMS.txt)
+  cp ../example1/content/owned.matou ../example1/content/additive.matou ../example1/content/structure.matou dist/matou-content/
+  printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\nfr.iamacat.example1.ExamplePack 64 minecraft:stone ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou\n# Optional structure job (x,y,z:block cells land at their own y; every palette block must resolve vanilla-side):\n# fr.iamacat.example1.ExamplePack 64 minecraft:stone ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou structureFile=<SERVER>/matou-content/structure.matou\n' > dist/packs.cfg.example
+  (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou matou-content/structure.matou packs.cfg.example > SHA256SUMS.txt)
   (cd dist && sha256sum -c SHA256SUMS.txt)
   echo "ok r2-release : dist/ assembled (VERSION=$VERSION)"
   exit 0

@@ -16,13 +16,16 @@ MC, self-test `java/test`, gate `tools/check.sh` (compiles against the
 Two-stage isolation, only `forge/` touches MC:
 
 - `java/src/fr/iamacat/bridge` (pure, zero MC): `SpiBridge` (decide→apply),
-  `CellSink` (application seam), `ForgeCells` (parse `x,z` + apply
-  verbatim, loud refusals), `ForgeSnapshot` (seals maps into an immutable
+  `CellSink` (application seam: `setCell` for `x,z` plane cells, `setBlock`
+  for `x,y,z:ns:block` volume cells, 2D-only sinks refuse 3D loudly),
+  `ForgeCells` (parse both shapes + apply verbatim with dispatch, loud
+  refusals), `ForgeSnapshot` (seals maps into an immutable
   `Snapshot`). Tested jar-free by `BridgeCheck`.
 - `forge/src/fr/iamacat/bridge/forge` (MC only): `MatouBridgeMod`
   (`@Mod(modid="matoubridge")`, FML server tick `END` → snapshot
   `matou:tick` → `SpiBridge.tick`), `WorldCellSink` (`CellSink` into
-  `World.setBlock`, y `0..255`). Passive B1 job (decides nothing, writes
+  `World.setBlock`, y `0..255`; volume cells resolve their block by name,
+  cached, unknown refused loudly). Passive B1 job (decides nothing, writes
   nothing, Q1 coexistence); content wiring (example1) follows in B2 on this
   seam.
 
@@ -44,7 +47,9 @@ never hardcoded).
 - Pure, MC-free tested: `ForgeContent` (seal → decide → owned-first merge →
   apply), `Packs` (strict config parse + reflective `load`), E2E
   `ForgeContentCheck` (real example1 jobs from the source files + fake
-  world; `ForgeContent.merge == AdditiveScatterJob.merge` comparator).
+  world; `ForgeContent.merge == AdditiveScatterJob.merge` comparator;
+  wired-pack decide keeps the legacy union first + 18 volume cells, and a
+  2D-only sink refuses the wired pack loudly).
 - FML (`forge/`, MC only): `PackWire.bind` (load + configure + block +
   y `0..255`, fail fast at init), `MatouBridgeMod.onWorldTick`
   (server, `END`, dimension 0 → `applyTo`).
