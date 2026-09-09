@@ -33,11 +33,13 @@ JAVA8_HOME="${JAVA8_HOME:-/usr/lib/jvm/java-8-openjdk}"
 FORGE_URL="${FORGE_URL:-https://maven.minecraftforge.net/net/minecraftforge/forge/1.7.10-10.13.4.1614-1.7.10/forge-1.7.10-10.13.4.1614-1.7.10-installer.jar}"
 BOOT_SECS="${BOOT_SECS:-150}"
 # R1 pins: measured 2026-09-09 from Maven installer + installed universal +
-# ForgeGradle 1614 srg-mcp.srg. Drift = loud failure, never silent upgrade.
+# ForgeGradle 1614 srg-mcp.srg + provisioned ASM 5.0.3 (identical sha1 across
+# 3 independent server caches). Drift = loud failure, never silent upgrade.
 INSTALLER_SHA1="fccafccf8ad4ce6d9f008e786b48ff53172bf9de"
 UNIVERSAL_SHA1="25fd97f72beca728112256938e03e8105b1b78cc"
 SRG_MCP_SHA1="1a97ef852abe78595d8f08a7975288448f244254"
 ASM_PIN="asm-all-5.0.3.jar"
+ASM_SHA1="4333508b8dd8ee72aa4e39afa713b3a74579b773"
 # SRG auto-discover (R1): ForgeGradle cache first, $SRG_MCP override wins.
 # No machine paths hardcoded: the default derives from $HOME.
 if [ -z "${SRG_MCP:-}" ]; then
@@ -106,6 +108,8 @@ echo "$UNIVERSAL_SHA1  $UNI" | sha1sum -c - >/dev/null 2>&1 \
   || { echo "FAIL b3-live : universal sha1 drift (want $UNIVERSAL_SHA1)"; exit 1; }
 ASM=$(find "$SERV/libraries/org/ow2/asm" -name "$ASM_PIN" | head -n 1)
 [ -n "$ASM" ] || { echo "FAIL b3-live : ASM $ASM_PIN missing from server libs"; exit 1; }
+echo "$ASM_SHA1  $ASM" | sha1sum -c - >/dev/null 2>&1 \
+  || { echo "FAIL b3-live : ASM sha1 drift (want $ASM_SHA1)"; exit 1; }
 echo "ok b3-live : server provisioned (pins verified)"
 
 # 2b. Pin every stubbed Forge member against the provisioned 1614 universal.

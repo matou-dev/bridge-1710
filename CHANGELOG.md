@@ -7,6 +7,12 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+- Repro: live-runner base image pinned by digest
+  (`eclipse-temurin:8-jdk-jammy@sha256:0d568cc4…cd9ed0c`); provisioned ASM
+  5.0.3 pinned by sha1 (any drift fails loudly, never silently).
+- CI: runner pinned (`ubuntu-24.04`), JDK 21 via `setup-java` (temurin),
+  actions pinned by SHA with Dependabot, missing `example1` sibling
+  checkout added (the gate compiles against it).
 - Docker: the live-runner image runs as a non-root `builder` user
   (`--build-arg UID/GID`), so bind-mounted `B3_DIR` checkouts keep host
   ownership (R3; pre-R3 root-owned `build/` leftovers must be cleared once).

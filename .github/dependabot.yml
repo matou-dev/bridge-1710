@@ -1,0 +1,7 @@
+# Keep pinned GitHub Actions fresh: SHA pins in workflows/ never drift silently.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

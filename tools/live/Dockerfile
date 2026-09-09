@@ -31,7 +31,9 @@
 # No machine paths inside the image: Java 8 + python3 + curl + git only
 # (git serves the R2 release guards: VERSION + clean-tree checks).
 # Pins and SRG auto-discover live in tools/run-live.sh, not here.
-FROM eclipse-temurin:8-jdk-jammy
+# Repro pin (2026-09-09, multi-arch index digest): same tag == same bytes.
+# Refresh deliberately (Docker Hub API), never silently.
+FROM eclipse-temurin:8-jdk-jammy@sha256:0d568cc4232ceb9ed2b5def9647c8f505ff504e8b21e3558e7a89ec59cd9ed0c
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 curl ca-certificates git \
  && rm -rf /var/lib/apt/lists
