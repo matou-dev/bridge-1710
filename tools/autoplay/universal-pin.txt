@@ -8,6 +8,9 @@
 cpw.mods.fml.common.gameevent.TickEvent$ClientTickEvent ClientTickEvent(
 cpw.mods.fml.common.gameevent.TickEvent$ServerTickEvent ServerTickEvent(
 cpw.mods.fml.common.gameevent.TickEvent$Phase END
+cpw.mods.fml.common.gameevent.TickEvent$WorldTickEvent world;
+cpw.mods.fml.common.eventhandler.EventBus post(
+cpw.mods.fml.relauncher.Side SERVER
 net.minecraftforge.common.MinecraftForge EVENT_BUS
 net.minecraftforge.event.world.BlockEvent public final int x;
 net.minecraftforge.event.world.BlockEvent public final int y;

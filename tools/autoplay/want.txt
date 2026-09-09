@@ -15,3 +15,21 @@
 M net/minecraft/client/Minecraft getMinecraft func_71410_x ()Lnet/minecraft/client/Minecraft; 1
 M net/minecraft/client/Minecraft launchIntegratedServer func_71371_a (Ljava/lang/String;Ljava/lang/String;Lnet/minecraft/world/WorldSettings;)V 0
 M net/minecraft/client/Minecraft shutdown func_71400_g ()V 0
+# Spike proof (SPIKE=1): server-side simulated harvest — resolve stone,
+# place it at an isolated coords outside the union slices, clear it, post
+# the BreakEvent the bridge hook records, then poll it back. Each line must
+# match exactly one MD line of the sha1-pinned srg-mcp.srg (same searge
+# practice as above); static-ness is documentary here (exact MD match is
+# the pin — a wrong MCP name dies loudly at derive time).
+M net/minecraft/block/Block getBlockFromName func_149684_b (Ljava/lang/String;)Lnet/minecraft/block/Block; 1
+M net/minecraft/world/World setBlock func_147449_b (IIILnet/minecraft/block/Block;)Z 0
+M net/minecraft/world/World setBlockToAir func_147468_f (III)Z 0
+M net/minecraft/world/World isAirBlock func_147437_c (III)Z 0
+# Spike proof dim filter: mine in dim 0 only (the integrated server ticks
+# dim 0/1/-1 from boot — measured. F lines match exactly one FD line each,
+# same searge practice; Reobf already remaps fields).
+F net/minecraft/world/World provider field_73011_w
+F net/minecraft/world/WorldProvider dimensionId field_76574_g
+# Spike harvest author: the BreakEvent constructor reads the player
+# (ForgeHooks.canHarvestBlock — measured NPE on null, never assumed).
+F net/minecraft/world/World playerEntities field_73010_i

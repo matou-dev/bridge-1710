@@ -26,6 +26,18 @@ if [ -n "$mc_hits" ]; then
   exit 1
 fi
 echo "ok (zero-mc-bridge)"
+# Etage 1 : les stubs ne tournent jamais (compile classpath only) — un
+# final sur un primitif y est une constante compile-time que javac plie
+# dans les bytes prod au lieu de lire le live (mesuré 2026-09-09 :
+# event.x/y/z pliés à 0,0,0 dans le hook spike, attrapé live). Refus.
+const_hits=$(rg -n --no-heading "final\s+(byte|short|int|long|float|double|boolean|char)\s+\w+\s*=" \
+  tools/live/stub tools/autoplay/stub 2>/dev/null || true)
+if [ -n "$const_hits" ]; then
+  echo "FAIL no-stub-const :"
+  echo "$const_hits"
+  exit 1
+fi
+echo "ok (no-stub-const)"
 # M1 walking-skeleton gate : compile contre les checkouts siblings ../spi
 # et ../example1 (convention siblings, cf. hub README). Refus bruyant.
 SPI=../spi/java/src

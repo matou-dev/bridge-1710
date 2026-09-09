@@ -2,8 +2,9 @@ package net.minecraft.world;
 
 /**
  * B3 compile stub: shape-only vanilla API used by {@code forge/} sources.
- * Never runs (compile classpath only). Every member is pinned to the
- * 1.7.10 SRG by tools/run-live.sh before compiling — drift fails loudly.
+ * Never runs (compile classpath only). {@code dimensionId} serves forge/
+ * (pinned by tools/run-live.sh) plus the spike dim-0 filter (pinned by
+ * tools/autoplay/want.txt) — drift fails loudly on the owning side.
  */
 public class WorldProvider {
     public int dimensionId;
