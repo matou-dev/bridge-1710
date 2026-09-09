@@ -131,7 +131,8 @@ echo "ok b3-live : forge stubs pinned to universal"
 #    same bytes), manifests carry VERSION, the bridge jar embeds mcmod.info.
 #    These are the exact bytes the live run proves AND the release ships.
 BLD="$B3_DIR/build"
-rm -rf "$BLD"
+rm -rf "$BLD" \
+  || { echo "FAIL b3-live : cannot clear <$BLD> (root-owned docker leftovers? point B3_DIR at a user-owned dir)"; exit 1; }
 mkdir -p "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/bridge" "$BLD/forge" "$BLD/jars"
 "$J8/javac" -source 8 -target 8 -nowarn -d "$BLD/spi" $(find ../spi/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/ex1" $(find ../example1/java/src -name '*.java')
