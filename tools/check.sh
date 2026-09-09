@@ -33,6 +33,14 @@ SPI=../spi/java/src
 EX1=../example1/java/src
 [ -d "$EX1" ] || { echo "FAIL bridge-content : example1 sibling absent (cloner hub+spi+bridge-1710+example1 en siblings)"; exit 1; }
 [ -f ../example1/content/owned.matou ] || { echo "FAIL bridge-content : example1 content absent"; exit 1; }
+# SPI_PIN : ce bridge est valide contre ce SPI-la, pas un autre. Un sibling
+# qui ne matche pas = bridge en avance/retard — re-valider puis bumper.
+PIN=$(tr -d '[:space:]' < SPI_PIN)
+[ -n "$PIN" ] || { echo "FAIL spi-pin : empty SPI_PIN"; exit 1; }
+want=$(git -C ../spi rev-list -n 1 "$PIN" 2>/dev/null) || { echo "FAIL spi-pin : unknown pin <$PIN> (fetch tags?)"; exit 1; }
+got=$(git -C ../spi rev-parse HEAD) || { echo "FAIL spi-pin : ../spi not a git checkout"; exit 1; }
+[ "$want" = "$got" ] || { echo "FAIL spi-pin : want $PIN ($want), sibling $got (re-validate, then bump SPI_PIN)"; exit 1; }
+echo "ok (spi-pin : $PIN)"
 mkdir -p java/build
 javac --release 8 -d java/build $(find "$SPI" "$EX1" java/src -name '*.java')
 javac --release 8 -cp java/build -d java/build $(find java/test -name '*.java')

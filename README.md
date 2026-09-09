@@ -11,6 +11,8 @@ Walking skeleton M1: `SpiBridge` (shared seam from `matou-spi` v1.1.0,
 `fr.iamacat.bridge`) pure without MC, self-test `java/test`
 (`ForgeContentCheck`), gate `tools/check.sh` (compiles against the
 `../spi` sibling). `TODO(FORGE)` marks the FML branching point.
+`SPI_PIN` pins the validated SPI (hub `check-bridges.sh` refuses bridge
+drift: pins, forge file-set, `E_FORGE_*` catalog).
 
 ## B1 Forge wiring (Forge 10.13.4.1614)
 
