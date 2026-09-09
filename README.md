@@ -1,58 +1,59 @@
-# matou-dev/bridge-1710 — traducteur SPI ↔ Minecraft 1.7.10
+# matou-dev/bridge-1710 — SPI ↔ Minecraft 1.7.10 translator
 
-Seul module autorisé à importer `net.minecraft` / Forge 1.7.10. Traduit la
-`matou-spi` vers le jeu (monde, registres, rendu, RPC dev). Contamination
-interdite : aucun import de l'ancienne `fr.iamacat.matoulib` (gate `check`).
+The only module allowed to import `net.minecraft` / Forge 1.7.10. Translates
+`matou-spi` into the game (world, registries, rendering, dev RPC).
+Contamination forbidden: no import of the legacy `fr.iamacat.matoulib`
+(`check` gate).
 
-Modid : `matoubridge` (cf. `NAMES.md`).
+Modid: `matoubridge` (see `NAMES.md`).
 
-Walking skeleton M1 : `SpiBridge` (`java/src/fr/iamacat/bridge`) pur sans MC,
-self-test `java/test`, gate `tools/check.sh` (compile contre le sibling
-`../spi`). `TODO(FORGE)` marque le point de branchement FML.
+Walking skeleton M1: `SpiBridge` (`java/src/fr/iamacat/bridge`) pure without
+MC, self-test `java/test`, gate `tools/check.sh` (compiles against the
+`../spi` sibling). `TODO(FORGE)` marks the FML branching point.
 
 ## B1 Forge wiring (Forge 10.13.4.1614)
 
-Isolation 2 étages, seule `forge/` touche MC :
+Two-stage isolation, only `forge/` touches MC:
 
-- `java/src/fr/iamacat/bridge` (pur, zéro MC) : `SpiBridge` (decide→apply),
-  `CellSink` (seam d'application), `ForgeCells` (parse `x,z` + apply
-  verbatim, refus bruyants), `ForgeSnapshot` (scelle les maps en `Snapshot`
-  immutable). Testé sans jars par `BridgeCheck`.
-- `forge/src/fr/iamacat/bridge/forge` (seul MC) : `MatouBridgeMod`
-  (`@Mod(modid="matoubridge")`, tick serveur FML `END` → snapshot
-  `matou:tick` → `SpiBridge.tick`), `WorldCellSink` (`CellSink` vers
-  `World.setBlock`, y `0..255`). Job B1 passif (décide rien, n'écrit rien,
-  cohabitation Q1) ; le câblage contenu (example1) suit en B2 sur ce seam.
+- `java/src/fr/iamacat/bridge` (pure, zero MC): `SpiBridge` (decide→apply),
+  `CellSink` (application seam), `ForgeCells` (parse `x,z` + apply
+  verbatim, loud refusals), `ForgeSnapshot` (seals maps into an immutable
+  `Snapshot`). Tested jar-free by `BridgeCheck`.
+- `forge/src/fr/iamacat/bridge/forge` (MC only): `MatouBridgeMod`
+  (`@Mod(modid="matoubridge")`, FML server tick `END` → snapshot
+  `matou:tick` → `SpiBridge.tick`), `WorldCellSink` (`CellSink` into
+  `World.setBlock`, y `0..255`). Passive B1 job (decides nothing, writes
+  nothing, Q1 coexistence); content wiring (example1) follows in B2 on this
+  seam.
 
-Gate : `./tools/check.sh` (étage 1 pur, toujours vert sans MC),
-`MC_JAR=<minecraft-1.7.10>.jar ./tools/check.sh` pour l'étage 2 Forge
-(compile `forge/` contre MC 1.7.10, skip sans `MC_JAR`). Aucun chemin
-machine en dur dans ce repo.
+Gate: `./tools/check.sh` (stage 1 pure, always green without MC),
+`MC_JAR=<minecraft-1.7.10>.jar ./tools/check.sh` for the Forge stage 2
+(compiles `forge/` against MC 1.7.10, skips without `MC_JAR`). No hardcoded
+machine path in this repo.
 
 ## B2 content wiring (packs)
 
-Le bridge reste aveugle au contenu au build (Q2) : les packs sont
-découverts par nom de classe depuis `config/matoubridge/packs.cfg`
-(`<class> <y> <block> [k=v ...]`, `#` commentaires, fichier absent =
-passif comme B1). Contrat en `matou-spi` (`ContentPack` + optionnel
-`ConfigurablePack`, constructeur public sans args) ; `ExamplePack`
-côté example1 (counts relus des `.matou` sources via le parser SPI,
-jamais en dur).
+The bridge stays content-blind at build time (Q2): packs are discovered by
+class name from `config/matoubridge/packs.cfg`
+(`<class> <y> <block> [k=v ...]`, `#` comments, missing file =
+passive like B1). Contract in `matou-spi` (`ContentPack` + optional
+`ConfigurablePack`, public no-arg constructor); `ExamplePack` on the
+example1 side (counts re-read from the `.matou` sources via the SPI parser,
+never hardcoded).
 
-- Pur testé sans MC : `ForgeContent` (seal → decide → merge owned-first →
-  apply), `Packs` (parse config strict + `load` réflexif), E2E
-  `ForgeContentCheck` (vrais jobs example1 depuis les fichiers sources +
-  faux monde ; comparateur `ForgeContent.merge == AdditiveScatterJob.merge`).
-- FML (`forge/`, seul MC) : `PackWire.bind` (load + configure + bloc +
-  y `0..255`, échec rapide à l'init), `MatouBridgeMod.onWorldTick`
-  (serveur, `END`, dimension 0 → `applyTo`).
-- Étage 2 = preuve de compilation contre Forge 1614 (le runtime MC hors
-  jeu manque de classpath : Guava... ; le comportement live se prouve en
-  jeu, pas ici).
+- Pure, MC-free tested: `ForgeContent` (seal → decide → owned-first merge →
+  apply), `Packs` (strict config parse + reflective `load`), E2E
+  `ForgeContentCheck` (real example1 jobs from the source files + fake
+  world; `ForgeContent.merge == AdditiveScatterJob.merge` comparator).
+- FML (`forge/`, MC only): `PackWire.bind` (load + configure + block +
+  y `0..255`, fail fast at init), `MatouBridgeMod.onWorldTick`
+  (server, `END`, dimension 0 → `applyTo`).
+- Stage 2 = compile proof against Forge 1614 (off-game MC runtime lacks
+  classpath: Guava...; live behaviour is proven in-game, not here).
 
 ## B3 live proof (Forge 1614 server run)
 
-Etage 2 compiles; only the game arbitrates runtime. B3 runs a real
+Stage 2 compiles; only the game arbitrates runtime. B3 runs a real
 1614 dedicated server with the built jars and compares the world against
 the pure decision union — see `tools/run-live.sh` (manual gate, needs
 network once + Java 8; env-driven, no machine paths: `B3_DIR` /
@@ -71,7 +72,7 @@ ForgeGradle 1614 cache under `$HOME` unless overridden).
   stone only, nothing foreign, nothing missing (`tools/live/anvil.py`).
 
 Live already paid for itself: the first B3 run caught two linkage bugs
-etage 2 could never see — `Block.getBlockFromName` and `World.provider`
+stage 2 could never see — `Block.getBlockFromName` and `World.provider`
 left un-remapped (`NoSuchMethodError`/`NoSuchFieldError` at init/tick),
 fixed by the reobf step, not by source changes (the sources were valid
 1.7.10 MCP all along).
@@ -83,7 +84,11 @@ fixed by the reobf step, not by source changes (the sources were valid
 - Cache: server provisioned once under `B3_DIR` (idempotent);
   `B3_OFFLINE=1` reuses the cache and never downloads.
 - Docker: `tools/live/Dockerfile` (JDK 8 + python3 + curl) reproduces the
-  runner without installing Java 8 on the host.
+  runner without installing Java 8 on the host. The image runs as a
+  non-root `builder` user — build with
+  `--build-arg UID=$(id -u) --build-arg GID=$(id -g)` so bind-mounted
+  `B3_DIR` checkouts keep host ownership (pre-R3 root-owned `build/`
+  leftovers must be cleared once).
 - Opt-in gate: `LIVE=1 ./tools/check.sh` runs the live proof after etages
   1-2; default stays green without network / Java 8 / SRG (same skip
   pattern as `MC_JAR`).
@@ -107,3 +112,10 @@ and exits before booting the server:
   the bridge jar is a loadable Forge mod and it never ships alone, so v1.0.0
   is a versioned source + server-drop release (git tags + GitHub releases),
   not a store publish.
+
+## R3 hygiene
+
+- Docs in English, per-repo `CHANGELOG.md`, public-ready READMEs (repos
+  stay private during dev).
+- Docker root-cause fix: non-root image user (see R1); the loud
+  `cannot clear <build>` guard in `run-live.sh` stays as defence in depth.
