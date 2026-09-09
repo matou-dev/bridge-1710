@@ -87,3 +87,23 @@ fixed by the reobf step, not by source changes (the sources were valid
 - Opt-in gate: `LIVE=1 ./tools/check.sh` runs the live proof after etages
   1-2; default stays green without network / Java 8 / SRG (same skip
   pattern as `MC_JAR`).
+
+## R2 release engineering
+
+`BUILD_ONLY=1 VERSION=x.y.z ./tools/run-live.sh` assembles `dist/` (gitignored)
+and exits before booting the server:
+
+- `matou-spi-<V>.jar`, `matou-example1-<V>.jar`, `matou-minimap-<V>.jar`
+  (pure, zero-MC), `matoubridge-<V>.jar` (reobfuscated SRG, embeds
+  `mcmod.info`), `matou-content/*.matou`, `packs.cfg.example`, `SHA256SUMS.txt`.
+- Same jar-creation path as the live run (sorted entries, mtimes pinned to
+  `SOURCE_DATE_EPOCH` or bridge HEAD time, manifest `Implementation-Version`),
+  so the live proof (`world == pure union`) covers the exact shipped bytes —
+  the MCP-named bridge jar never ships, only the reobf one.
+- Release guards fail loudly: `VERSION` must be strict `X.Y.Z`, the 4 code
+  repos must have clean trees, and `@Mod version` must equal `VERSION`
+  (bump `MatouBridgeMod` source first, never the tag alone).
+- Store listings (Modrinth/CurseForge, see hub `NAMES.md`) stay DRAFT: only
+  the bridge jar is a loadable Forge mod and it never ships alone, so v1.0.0
+  is a versioned source + server-drop release (git tags + GitHub releases),
+  not a store publish.

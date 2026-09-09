@@ -16,6 +16,13 @@
 #   BOOT_SECS  server run time (default 150; short runs fail coverage loudly)
 #   B3_OFFLINE=1  never download (fail loudly if cache files missing)
 #
+# R2 release assembly: BUILD_ONLY=1 VERSION=x.y.z assembles dist/ (versioned
+# jars + content + packs.cfg.example + SHA256SUMS) and exits before booting
+# the server. Release demands strict X.Y.Z, a clean tree in all 4 code repos,
+# and @Mod version == VERSION; anything else fails loudly, never defaulted.
+# SOURCE_DATE_EPOCH pins jar entry mtimes (default: bridge HEAD commit time),
+# so the same commit always yields the same bytes.
+#
 # Reproducibility pins (R1): installer / universal / SRG sha1 below. Any
 # upstream drift fails loudly instead of running against unknown bytes.
 set -eu
@@ -42,7 +49,21 @@ J8="$JAVA8_HOME/bin"
 [ -x "$J8/java" ] || { echo "FAIL b3-live : no Java 8 at <$JAVA8_HOME>"; exit 1; }
 [ -d ../spi/java/src ] || { echo "FAIL b3-live : spi sibling absent"; exit 1; }
 [ -d ../example1/java/src ] || { echo "FAIL b3-live : example1 sibling absent"; exit 1; }
+[ -d ../minimap/java/src ] || { echo "FAIL b3-live : minimap sibling absent"; exit 1; }
 command -v python3 >/dev/null || { echo "FAIL b3-live : python3 required (anvil verify)"; exit 1; }
+# R2 versioning: VERSION stamps manifests + mcmod.info. Dev live runs take an
+# explicit non-release default; release assembly demands strict X.Y.Z.
+VERSION="${VERSION:-0.0-dev}"
+if [ "${BUILD_ONLY:-}" = "1" ]; then
+  printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+    || { echo "FAIL r2-release : VERSION=<$VERSION> not X.Y.Z (want e.g. 1.0.0)"; exit 1; }
+  for r in . ../spi ../example1 ../minimap; do
+    git -C "$r" diff --quiet && git -C "$r" diff --cached --quiet \
+      || { echo "FAIL r2-release : dirty tree in <$r> (release from clean checkouts only)"; exit 1; }
+  done
+  grep -q "version = \"$VERSION\"" forge/src/fr/iamacat/bridge/forge/MatouBridgeMod.java \
+    || { echo "FAIL r2-release : @Mod version != VERSION=<$VERSION> (bump source first)"; exit 1; }
+fi
 
 # 1. Pin every stubbed vanilla member to the exact SRG used for reobf.
 #    A stub the SRG does not know is a loud failure, never a silent default.
@@ -106,15 +127,34 @@ echo "ok b3-live : forge stubs pinned to universal"
 
 # 3. Build all mod jars with Java 8. forge/ compiles against the pinned
 #    stubs (vanilla shape + Forge shape); the live run is the semantic arbiter.
+#    R2: jar entries are sorted with mtimes pinned to EPOCH (same commit ==
+#    same bytes), manifests carry VERSION, the bridge jar embeds mcmod.info.
+#    These are the exact bytes the live run proves AND the release ships.
 BLD="$B3_DIR/build"
 rm -rf "$BLD"
-mkdir -p "$BLD/spi" "$BLD/ex1" "$BLD/bridge" "$BLD/forge" "$BLD/jars"
+mkdir -p "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/bridge" "$BLD/forge" "$BLD/jars"
 "$J8/javac" -source 8 -target 8 -nowarn -d "$BLD/spi" $(find ../spi/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/ex1" $(find ../example1/java/src -name '*.java')
+"$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/mini" $(find ../minimap/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi:$BLD/ex1" -d "$BLD/bridge" $(find java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi:$BLD/ex1:$BLD/bridge" -d "$BLD/forge" $(find tools/live/stub forge/src -name '*.java')
-"$J8/jar" cf "$BLD/jars/matou-spi.jar" -C "$BLD/spi" .
-"$J8/jar" cf "$BLD/jars/matou-example1.jar" -C "$BLD/ex1" .
+EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
+printf 'Manifest-Version: 1.0\nImplementation-Version: %s\n' "$VERSION" > "$BLD/MANIFEST.MF"
+cat > "$BLD/mcmod.info" <<EOF
+[{"modid": "matoubridge", "name": "MatouBridge", "description": "SPI bridge for Minecraft 1.7.10 (reobfuscated SRG).", "version": "$VERSION", "mcversion": "1.7.10", "authorList": ["matou-dev"], "url": "https://github.com/matou-dev/bridge-1710"}]
+EOF
+find "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/bridge" "$BLD/forge" "$BLD/MANIFEST.MF" "$BLD/mcmod.info" -exec touch -h -d "@$EPOCH" {} +
+# mkjar: sorted entries, pinned mtimes, VERSION manifest. File lists stay
+# explicit because jar -C . walks in readdir order (not reproducible).
+mkjar() {
+  out="$1"; stage="$2"
+  files=$(cd "$stage" && find . -type f | LC_ALL=C sort)
+  # Controlled tree, no spaces in class paths: word-splitting is intended.
+  (cd "$stage" && "$J8/jar" cfm "$out" "$BLD/MANIFEST.MF" $files)
+}
+mkjar "$BLD/jars/matou-spi.jar" "$BLD/spi"
+mkjar "$BLD/jars/matou-example1.jar" "$BLD/ex1"
+mkjar "$BLD/jars/matou-minimap.jar" "$BLD/mini"
 rm -rf "$BLD/bridgemod" && mkdir -p "$BLD/bridgemod"
 cp -r "$BLD/bridge/"* "$BLD/bridgemod/" && cp -r "$BLD/forge/"* "$BLD/bridgemod/"
 # Stubs are compile-only: they must never ship (a fake Block on the
@@ -124,8 +164,10 @@ if [ -e "$BLD/bridgemod/net" ] || [ -e "$BLD/bridgemod/cpw" ]; then
   echo "FAIL b3-live : stub leak into mod jar"
   exit 1
 fi
-"$J8/jar" cf "$BLD/jars/matoubridge.jar" -C "$BLD/bridgemod" .
-echo "ok b3-live : jars built"
+cp "$BLD/mcmod.info" "$BLD/bridgemod/mcmod.info"
+touch -h -d "@$EPOCH" "$BLD/bridgemod/mcmod.info"
+mkjar "$BLD/jars/matoubridge.jar" "$BLD/bridgemod"
+echo "ok b3-live : jars built (VERSION=$VERSION)"
 
 # 4. Reobfuscate MCP-named refs to SRG (ForgeGradle reobf equivalent:
 #    runtime vanilla only declares SRG names, so un-reobfed jars die with
@@ -133,6 +175,22 @@ echo "ok b3-live : jars built"
 "$J8/javac" -cp "$ASM" -d "$BLD" tools/live/Reobf.java
 "$J8/java" -cp "$BLD:$ASM" Reobf "$SRG_MCP" "$BLD/jars/matoubridge.jar" "$BLD/jars/matoubridge-reobf.jar"
 echo "ok b3-live : bridge reobfuscated"
+
+# R2 release assembly: versioned server drop, then exit before booting.
+# The MCP-named bridge jar never ships (only the reobf one is copied).
+if [ "${BUILD_ONLY:-}" = "1" ]; then
+  rm -rf dist && mkdir -p dist/matou-content
+  cp "$BLD/jars/matou-spi.jar" "dist/matou-spi-$VERSION.jar"
+  cp "$BLD/jars/matou-example1.jar" "dist/matou-example1-$VERSION.jar"
+  cp "$BLD/jars/matou-minimap.jar" "dist/matou-minimap-$VERSION.jar"
+  cp "$BLD/jars/matoubridge-reobf.jar" "dist/matoubridge-$VERSION.jar"
+  cp ../example1/content/owned.matou ../example1/content/additive.matou dist/matou-content/
+  printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\nfr.iamacat.example1.ExamplePack 64 minecraft:stone ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou\n' > dist/packs.cfg.example
+  (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou packs.cfg.example > SHA256SUMS.txt)
+  (cd dist && sha256sum -c SHA256SUMS.txt)
+  echo "ok r2-release : dist/ assembled (VERSION=$VERSION)"
+  exit 0
+fi
 
 # 5. Deploy mods + content + packs.cfg, boot the server.
 mkdir -p "$SERV/mods" "$SERV/config/matoubridge"
