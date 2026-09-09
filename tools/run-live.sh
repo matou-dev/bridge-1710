@@ -153,21 +153,22 @@ echo "ok b3-live : forge stubs pinned to universal"
 #    commit + same toolchain == same bytes, see normjar), manifests carry
 #    VERSION, the bridge jar embeds mcmod.info.
 #    These are the exact bytes the live run proves AND the release ships.
+#    (No java/ stage: the pure seam ships from matou-spi, this repo carries
+#    only its Forge side.)
 BLD="$B3_DIR/build"
 rm -rf "$BLD" \
   || { echo "FAIL b3-live : cannot clear <$BLD> (root-owned docker leftovers? point B3_DIR at a user-owned dir)"; exit 1; }
-mkdir -p "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/bridge" "$BLD/forge" "$BLD/jars"
+mkdir -p "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/forge" "$BLD/jars"
 "$J8/javac" -source 8 -target 8 -nowarn -d "$BLD/spi" $(find ../spi/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/ex1" $(find ../example1/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/mini" $(find ../minimap/java/src -name '*.java')
-"$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi:$BLD/ex1" -d "$BLD/bridge" $(find java/src -name '*.java')
-"$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi:$BLD/ex1:$BLD/bridge" -d "$BLD/forge" $(find tools/live/stub forge/src -name '*.java')
+"$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi:$BLD/ex1" -d "$BLD/forge" $(find tools/live/stub forge/src -name '*.java')
 EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
 printf 'Manifest-Version: 1.0\nImplementation-Version: %s\n' "$VERSION" > "$BLD/MANIFEST.MF"
 cat > "$BLD/mcmod.info" <<EOF
 [{"modid": "matoubridge", "name": "MatouBridge", "description": "SPI bridge for Minecraft 1.7.10 (reobfuscated SRG).", "version": "$VERSION", "mcversion": "1.7.10", "authorList": ["matou-dev"], "url": "https://github.com/matou-dev/bridge-1710"}]
 EOF
-find "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/bridge" "$BLD/forge" "$BLD/MANIFEST.MF" "$BLD/mcmod.info" -exec touch -h -d "@$EPOCH" {} +
+find "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/forge" "$BLD/MANIFEST.MF" "$BLD/mcmod.info" -exec touch -h -d "@$EPOCH" {} +
 # mkjar: sorted entries, pinned mtimes, VERSION manifest. File lists stay
 # explicit because jar -C . walks in readdir order (not reproducible).
 # normjar then clamps every zip entry timestamp: the JDK 8 jar tool stamps
@@ -203,7 +204,7 @@ mkjar "$BLD/jars/matou-spi.jar" "$BLD/spi"
 mkjar "$BLD/jars/matou-example1.jar" "$BLD/ex1"
 mkjar "$BLD/jars/matou-minimap.jar" "$BLD/mini"
 rm -rf "$BLD/bridgemod" && mkdir -p "$BLD/bridgemod"
-cp -r "$BLD/bridge/"* "$BLD/bridgemod/" && cp -r "$BLD/forge/"* "$BLD/bridgemod/"
+cp -r "$BLD/forge/"* "$BLD/bridgemod/"
 # Stubs are compile-only: they must never ship (a fake Block on the
 # runtime classpath would shadow vanilla). Refuse loudly if leaked.
 rm -rf "$BLD/bridgemod/net" "$BLD/bridgemod/cpw"
@@ -301,8 +302,8 @@ echo "ok b3-live : bind clean, ticks clean"
 #    y=64..65; structure offsets reach x,z=17, and the hut anchor z=-4
 #    spills into chunk row -1 (region r.0.-1.mca) — hence the 6-chunk,
 #    3-slice read.
-"$J8/javac" -cp "$BLD/spi:$BLD/ex1:$BLD/bridge" -d "$BLD" tools/live/CellUnion.java
-"$J8/java" -cp "$BLD:$BLD/spi:$BLD/ex1:$BLD/bridge" CellUnion \
+"$J8/javac" -cp "$BLD/spi:$BLD/ex1" -d "$BLD" tools/live/CellUnion.java
+"$J8/java" -cp "$BLD:$BLD/spi:$BLD/ex1" CellUnion \
   "$SERV/config/matoubridge/packs.cfg" 4000 "$BLD/union.txt"
 : > "$BLD/world.txt"
 for spec in "r.0.0.mca 0 0" "r.0.0.mca 1 0" "r.0.0.mca 0 1" \
