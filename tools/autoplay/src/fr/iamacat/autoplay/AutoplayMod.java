@@ -1,10 +1,10 @@
 package fr.iamacat.autoplay;
 
+import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
 import net.minecraft.client.Minecraft;
-import net.minecraftforge.common.MinecraftForge;
 
 /**
  * Autoplay companion (DEV ONLY, never ships): drives the scripted client
@@ -24,8 +24,16 @@ import net.minecraftforge.common.MinecraftForge;
  * tools/autoplay/want.txt against the sha1-pinned srg-mcp.srg — same
  * searge numbers and descriptors as the 1122-pinned triple.
  *
- * <p>Stop clock: SERVER ticks, not client ticks. The bridge applies on the
- * server thread, and on one JVM the client can out-tick a loaded server
+  * <p>1.7.10 bus (measured, not assumed): tick events flow on the FML bus —
+  * {@code FMLCommonHandler.instance().bus().register(this)}, same as the
+  * bridge itself (B3 server proof green). Registering on
+  * {@code MinecraftForge.EVENT_BUS} — the 1122 companion shape, green there —
+  * receives nothing on 1.7.10: the first live run booted 5 mods then sat
+  * silent to the 600s watchdog. The FML bus stub already ships in
+  * tools/live/stub (compile classpath only).
+  *
+  * <p>Stop clock: SERVER ticks, not client ticks. The bridge applies on the
+  * server thread, and on one JVM the client can out-tick a loaded server
  * (or burn client ticks on the loading screen while no server tick has
  * run yet) — stopping on client ticks under-counts the addressed union
  * (measured: 967/1274 on the first 1122 run). WAIT_SERVER_TICKS overshoots
@@ -48,7 +56,7 @@ public class AutoplayMod {
     boolean done = false;
 
     public AutoplayMod() {
-        MinecraftForge.EVENT_BUS.register(this);
+        FMLCommonHandler.instance().bus().register(this);
     }
 
     @SubscribeEvent
@@ -67,11 +75,13 @@ public class AutoplayMod {
         Minecraft mc = Minecraft.getMinecraft();
         if (!joined) {
             joined = true;
+            System.out.println("[MatouAutoplay] joining world <" + WORLD + ">");
             mc.launchIntegratedServer(WORLD, WORLD, null);
             return;
         }
         if (serverTicks >= WAIT_SERVER_TICKS && !done) {
             done = true;
+            System.out.println("[MatouAutoplay] done after " + serverTicks + " server ticks, shutting down");
             mc.shutdown();
         }
     }
