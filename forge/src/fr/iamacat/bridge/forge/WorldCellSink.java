@@ -24,13 +24,18 @@ public final class WorldCellSink implements CellSink {
         if (block == null) {
             throw new NullPointerException("E_FORGE_BLOCK:null");
         }
+        checkY(y);
+        this.world = world;
+        this.y = y;
+        this.block = block;
+    }
+
+    /** Single owner of the 1.7.10 height rule (also used at wire bind). */
+    static void checkY(int y) {
         if (y < 0 || y > MAX_Y) {
             throw new IllegalArgumentException(
                     "E_FORGE_Y:range <" + y + "> (want 0.." + MAX_Y + ")");
         }
-        this.world = world;
-        this.y = y;
-        this.block = block;
     }
 
     public void setCell(int x, int z) {

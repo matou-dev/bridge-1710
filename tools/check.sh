@@ -24,14 +24,18 @@ if [ -n "$mc_hits" ]; then
   exit 1
 fi
 echo "ok (zero-mc-bridge)"
-# M1 walking-skeleton gate : compile contre le checkout sibling ../spi
-# (convention siblings, cf. hub README). Refus bruyant si absent.
+# M1 walking-skeleton gate : compile contre les checkouts siblings ../spi
+# et ../example1 (convention siblings, cf. hub README). Refus bruyant.
 SPI=../spi/java/src
 [ -d "$SPI" ] || { echo "FAIL bridge-skeleton : spi sibling absent (cloner hub+spi+bridge-1710 en siblings)"; exit 1; }
+EX1=../example1/java/src
+[ -d "$EX1" ] || { echo "FAIL bridge-content : example1 sibling absent (cloner hub+spi+bridge-1710+example1 en siblings)"; exit 1; }
+[ -f ../example1/content/owned.matou ] || { echo "FAIL bridge-content : example1 content absent"; exit 1; }
 mkdir -p java/build
-javac --release 8 -d java/build $(find "$SPI" java/src -name '*.java')
+javac --release 8 -d java/build $(find "$SPI" "$EX1" java/src -name '*.java')
 javac --release 8 -cp java/build -d java/build $(find java/test -name '*.java')
 java -cp java/build fr.iamacat.bridge.BridgeCheck
+java -cp java/build fr.iamacat.bridge.ForgeContentCheck
 # Etage 2 : forge/ seul touche MC (Forge 10.13.4.1614). Sans MC_JAR : skip.
 if [ -z "${MC_JAR:-}" ]; then
   echo "skip forge (no MC_JAR)"
