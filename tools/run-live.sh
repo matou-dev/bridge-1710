@@ -8,7 +8,8 @@
 # mismatch fails loudly, never defaulted.
 #
 # Env (no machine paths hardcoded):
-#   B3_DIR     work dir (default ${TMPDIR:-/tmp}/matou-b3-live)
+#   B3_DIR     work dir (default ${TMPDIR:-/tmp}/matou-b3-live; non-owned
+#              leftovers refused loudly by the preflight — clean or fresh dir)
 #   JAVA8_HOME Java 8 home (default /usr/lib/jvm/java-8-openjdk)
 #   SRG_MCP    path to srg-mcp.srg for 1.7.10-1614 (default: ForgeGradle
 #              cache under $HOME; override for userdev copies)
@@ -89,6 +90,22 @@ echo "ok b3-live : stubs pinned to SRG"
 mkdir -p "$B3_DIR"
 SERV="$B3_DIR/server"
 mkdir -p "$SERV"
+# 2a. B3_DIR preflight: docker runs leave root-owned leftovers (build/,
+#     world/, logs/, matou-content/) that a host run cannot clear file by
+#     file (rm needs write on the root-owned parent). Fail fast with the fix
+#     instead of dying mid-run or reusing stale state silently.
+if [ -e "$B3_DIR" ]; then
+  BAD_OWNER=$(find "$B3_DIR" ! -user "$(id -un)" -print -quit 2>/dev/null || true)
+  if [ -n "$BAD_OWNER" ]; then
+    echo "FAIL b3-live : B3_DIR=<$B3_DIR> has non-owned leftovers (e.g. <$BAD_OWNER> from a docker run as root)"
+    echo "fix: sudo rm -rf <$B3_DIR/build> <$B3_DIR/server/world> <$B3_DIR/server/logs> <$B3_DIR/server/matou-content> OR B3_DIR=/tmp/matou-b3-clean $0"
+    exit 1
+  fi
+  if [ ! -w "$B3_DIR" ]; then
+    echo "FAIL b3-live : B3_DIR=<$B3_DIR> not writable (fix ownership or point B3_DIR at a user-owned dir)"
+    exit 1
+  fi
+fi
 if [ ! -f "$B3_DIR/forge-installer.jar" ]; then
   if [ "${B3_OFFLINE:-}" = "1" ]; then
     echo "FAIL b3-live : offline and installer absent ($B3_DIR/forge-installer.jar)"

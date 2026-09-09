@@ -7,6 +7,12 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+- `B3_DIR` preflight guard in `run-live.sh`: any non-owned leftovers under
+  `$B3_DIR` (docker root-owned `build/`, `world/`, `logs/`,
+  `matou-content/`) fail fast with the fix (`sudo rm -rf` the four dirs or
+  a fresh `B3_DIR`), instead of dying mid-run or reusing stale state.
+  The clean-dir workaround (`B3_DIR=/tmp/matou-b3-clean`) is now the
+  loud default path, not tribal knowledge.
 - Live wires the composite `hut` (structureFile + `block.*` stone aliases
   in `packs.cfg`): `CellUnion` now replays the live `packs.cfg` wire
   (reflective load, same configure path as `PackWire.bind`) and the
