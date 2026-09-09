@@ -7,20 +7,23 @@ Contamination forbidden: no import of the legacy `fr.iamacat.matoulib`
 
 Modid: `matoubridge` (see `NAMES.md`).
 
-Walking skeleton M1: `SpiBridge` (`java/src/fr/iamacat/bridge`) pure without
-MC, self-test `java/test`, gate `tools/check.sh` (compiles against the
+Walking skeleton M1: `SpiBridge` (shared seam from `matou-spi` v1.1.0,
+`fr.iamacat.bridge`) pure without MC, self-test `java/test`
+(`ForgeContentCheck`), gate `tools/check.sh` (compiles against the
 `../spi` sibling). `TODO(FORGE)` marks the FML branching point.
 
 ## B1 Forge wiring (Forge 10.13.4.1614)
 
 Two-stage isolation, only `forge/` touches MC:
 
-- `java/src/fr/iamacat/bridge` (pure, zero MC): `SpiBridge` (decide→apply),
-  `CellSink` (application seam: `setCell` for `x,z` plane cells, `setBlock`
-  for `x,y,z:ns:block` volume cells, 2D-only sinks refuse 3D loudly),
-  `ForgeCells` (parse both shapes + apply verbatim with dispatch, loud
-  refusals), `ForgeSnapshot` (seals maps into an immutable
-  `Snapshot`). Tested jar-free by `BridgeCheck`.
+- Shared apply seam from `matou-spi` v1.1.0 (`fr.iamacat.bridge`, pure,
+  zero MC): `SpiBridge` (decide→apply), `CellSink` (application seam:
+  `setCell` for `x,z` plane cells, `setBlock` for `x,y,z:ns:block`
+  volume cells, 2D-only sinks refuse 3D loudly), `ForgeCells` (parse
+  both shapes + apply verbatim with dispatch, loud refusals),
+  `ForgeSnapshot` (seals maps into an immutable `Snapshot`). This repo
+  carries only its Forge side below; the seam itself is tested jar-free
+  by `BridgeCheck` in `matou-spi`.
 - `forge/src/fr/iamacat/bridge/forge` (MC only): `MatouBridgeMod`
   (`@Mod(modid="matoubridge")`, FML server tick `END` → snapshot
   `matou:tick` → `SpiBridge.tick`), `WorldCellSink` (`CellSink` into

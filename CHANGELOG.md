@@ -7,6 +7,11 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+- Shared apply seam moved up to `matou-spi` v1.1.0 at identical FQNs:
+  `java/src/fr.iamacat/bridge` (6 files) and `BridgeCheck` deleted here,
+  consumed from the `../spi` sibling (already on the gate classpath).
+  `ForgeContentCheck` stays: it compares against `../example1`. FQNs and
+  behavior unchanged.
 - `B3_DIR` preflight guard in `run-live.sh`: any non-owned leftovers under
   `$B3_DIR` (docker root-owned `build/`, `world/`, `logs/`,
   `matou-content/`) fail fast with the fix (`sudo rm -rf` the four dirs or
