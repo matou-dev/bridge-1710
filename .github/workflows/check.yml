@@ -4,5 +4,12 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
+      # Sibling layout (cf. hub README) : tools/check.sh compiles against ../spi.
       - uses: actions/checkout@v4
-      - run: sh tools/check.sh
+        with:
+          path: bridge-1710
+      - uses: actions/checkout@v4
+        with:
+          repository: matou-dev/spi
+          path: spi
+      - run: sh bridge-1710/tools/check.sh
