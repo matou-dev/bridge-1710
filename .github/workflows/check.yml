@@ -7,14 +7,14 @@ jobs:
       # Sibling layout (cf. hub README): tools/check.sh compiles against
       # ../spi and ../example1. Refuses loudly when absent.
       # Actions pinned by SHA 2026-09-09 (tags v4); Dependabot keeps them fresh.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: bridge-1710
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: matou-dev/spi
           path: spi
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: matou-dev/example1
           path: example1
