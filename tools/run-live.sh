@@ -20,8 +20,9 @@
 # jars + content + packs.cfg.example + SHA256SUMS) and exits before booting
 # the server. Release demands strict X.Y.Z, a clean tree in all 4 code repos,
 # and @Mod version == VERSION; anything else fails loudly, never defaulted.
-# SOURCE_DATE_EPOCH pins jar entry mtimes (default: bridge HEAD commit time),
-# so the same commit always yields the same bytes.
+# SOURCE_DATE_EPOCH pins jar entry timestamps (default: bridge HEAD commit
+# time); with a pinned toolchain (tools/live/Dockerfile) the same commit
+# always yields the same bytes.
 #
 # Reproducibility pins (R1): installer / universal / SRG sha1 below. Any
 # upstream drift fails loudly instead of running against unknown bytes.
@@ -127,8 +128,9 @@ echo "ok b3-live : forge stubs pinned to universal"
 
 # 3. Build all mod jars with Java 8. forge/ compiles against the pinned
 #    stubs (vanilla shape + Forge shape); the live run is the semantic arbiter.
-#    R2: jar entries are sorted with mtimes pinned to EPOCH (same commit ==
-#    same bytes), manifests carry VERSION, the bridge jar embeds mcmod.info.
+#    R2: jar entries are sorted with timestamps clamped to EPOCH (same
+#    commit + same toolchain == same bytes, see normjar), manifests carry
+#    VERSION, the bridge jar embeds mcmod.info.
 #    These are the exact bytes the live run proves AND the release ships.
 BLD="$B3_DIR/build"
 rm -rf "$BLD" \
@@ -147,11 +149,34 @@ EOF
 find "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/bridge" "$BLD/forge" "$BLD/MANIFEST.MF" "$BLD/mcmod.info" -exec touch -h -d "@$EPOCH" {} +
 # mkjar: sorted entries, pinned mtimes, VERSION manifest. File lists stay
 # explicit because jar -C . walks in readdir order (not reproducible).
+# normjar then clamps every zip entry timestamp: the JDK 8 jar tool stamps
+# META-INF entries with the wall clock (verified by diff), and Reobf does
+# the same for its output. python3 is already a hard dependency (anvil).
+# Scope: same commit + same toolchain == same bytes (zlib/JDK may vary
+# across machines; use tools/live/Dockerfile to pin the toolchain).
+normjar() {
+  python3 - "$1" "$EPOCH" <<'EOF'
+import sys, zipfile, datetime
+path, epoch = sys.argv[1], int(sys.argv[2])
+dt = datetime.datetime.utcfromtimestamp(epoch).timetuple()[:6]
+zin = zipfile.ZipFile(path)
+items = [(i, zin.read(i.filename)) for i in zin.infolist()]
+zin.close()
+zout = zipfile.ZipFile(path + ".norm", "w", zipfile.ZIP_DEFLATED)
+for info, data in items:
+    info.date_time = dt
+    info.create_system = 0
+    zout.writestr(info, data)
+zout.close()
+EOF
+  mv "$1.norm" "$1"
+}
 mkjar() {
   out="$1"; stage="$2"
   files=$(cd "$stage" && find . -type f | LC_ALL=C sort)
   # Controlled tree, no spaces in class paths: word-splitting is intended.
   (cd "$stage" && "$J8/jar" cfm "$out" "$BLD/MANIFEST.MF" $files)
+  normjar "$out"
 }
 mkjar "$BLD/jars/matou-spi.jar" "$BLD/spi"
 mkjar "$BLD/jars/matou-example1.jar" "$BLD/ex1"
@@ -175,6 +200,7 @@ echo "ok b3-live : jars built (VERSION=$VERSION)"
 #    NoSuchMethodError — found live in B3, never again silently).
 "$J8/javac" -cp "$ASM" -d "$BLD" tools/live/Reobf.java
 "$J8/java" -cp "$BLD:$ASM" Reobf "$SRG_MCP" "$BLD/jars/matoubridge.jar" "$BLD/jars/matoubridge-reobf.jar"
+normjar "$BLD/jars/matoubridge-reobf.jar"
 echo "ok b3-live : bridge reobfuscated"
 
 # R2 release assembly: versioned server drop, then exit before booting.
