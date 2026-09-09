@@ -1,0 +1,7 @@
+# B3 autoplay searge-map pin (DEV only): the derive filters want.txt out of
+# this exact srg-mcp.srg. SHA1 must equal the bridge SRG_MCP_SHA1 pin in
+# tools/run-live.sh (hub tools/run-client.sh cross-checks — the bridge
+# owns the pin, this file only opts into searge-derive mode).
+# Measured 2026-09-09 from the ForgeGradle 1614 cache (same bytes the B3
+# live derive reobfuscates against).
+SHA1=1a97ef852abe78595d8f08a7975288448f244254

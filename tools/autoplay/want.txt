@@ -1,0 +1,17 @@
+# B3 autoplay companion WANT: vanilla members the dev-only companion
+# references, one per line (M = method, owner searge + MCP name + searge
+# name + descriptor + static 0|1). hub tools/run-client.sh (AUTOPLAY=1)
+# filters these lines out of the sha1-pinned srg-mcp.srg (tools/autoplay/
+# srg-mcp.txt cross-checks the bridge SRG_MCP_SHA1) and copies the matched
+# MD lines verbatim into the narrow map. Searge era: the 1614 runtime is
+# itself searge-named, so no vanilla javap check is possible (true-obf
+# names) — the exact MD-line match (searge + MCP + both descriptors) is
+# the pin, same practice as the B3 live pin_method checks. Static-ness
+# rides the 1122-pinned triple: same searge numbers and descriptors,
+# proven there by javap + snapshot (func_71371_a=launchIntegratedServer,
+# func_71400_g=shutdown, func_71410_x=getMinecraft). No snapshot CSVs exist
+# for 1710; a wrong MCP name dies loudly at runtime (NoSuchMethodError),
+# never silently.
+M net/minecraft/client/Minecraft getMinecraft func_71410_x ()Lnet/minecraft/client/Minecraft; 1
+M net/minecraft/client/Minecraft launchIntegratedServer func_71371_a (Ljava/lang/String;Ljava/lang/String;Lnet/minecraft/world/WorldSettings;)V 0
+M net/minecraft/client/Minecraft shutdown func_71400_g ()V 0

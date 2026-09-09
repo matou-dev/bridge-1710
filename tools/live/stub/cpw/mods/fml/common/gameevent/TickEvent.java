@@ -6,6 +6,9 @@ import net.minecraft.world.World;
 /**
  * B3 compile stub, never runs (see Mod.java). Mirrors the 1614 shape:
  * side/phase live on the TickEvent parent, world on WorldTickEvent.
+ * ClientTickEvent and ServerTickEvent (no world field) serve the dev-only
+ * autoplay companion (tools/autoplay/, never shipped) — same practice as
+ * bridge-1122.
  */
 public class TickEvent {
     public enum Type {
@@ -32,6 +35,18 @@ public class TickEvent {
         public WorldTickEvent(Side side, Phase phase, World world) {
             super(Type.WORLD, side, phase);
             this.world = world;
+        }
+    }
+
+    public static class ClientTickEvent extends TickEvent {
+        public ClientTickEvent(Side side, Phase phase) {
+            super(Type.CLIENT, side, phase);
+        }
+    }
+
+    public static class ServerTickEvent extends TickEvent {
+        public ServerTickEvent(Side side, Phase phase) {
+            super(Type.SERVER, side, phase);
         }
     }
 }

@@ -1,0 +1,13 @@
+# B3 autoplay Forge-surface pins (universal jar, never obfuscated): each
+# line is CLASS + grep pattern checked by hub tools/run-client.sh
+# (AUTOPLAY=1) via javap — same practice as the pin_uni checks in
+# tools/run-live.sh (B3 step 2b). Drift fails loudly. 1.7.10 shape: FML
+# lives under cpw.mods.fml (not net.minecraftforge.fml), and MinecraftForge
+# under net.minecraftforge.common (measured against the pinned 1614
+# universal, never assumed).
+cpw.mods.fml.common.gameevent.TickEvent$ClientTickEvent ClientTickEvent(
+cpw.mods.fml.common.gameevent.TickEvent$ServerTickEvent ServerTickEvent(
+cpw.mods.fml.common.gameevent.TickEvent$Phase END
+net.minecraftforge.common.MinecraftForge EVENT_BUS
+cpw.mods.fml.common.Mod modid()
+cpw.mods.fml.common.eventhandler.EventBus register(
