@@ -7,6 +7,10 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+- Dual-runtime contract: shipped jars must stay Java 8 bytecode (major 52,
+  no `module-info`, no multi-release) — enforced by `run-live.sh` on live
+  and release runs; README documents the Java 8 vanilla / 17-21 lwjgl3ify
+  matrix.
 - Live re-proof 2026-09-09 (post repro-pinning: hub `b730266` / spi
   `66cdb52` / bridge `0bcd2f9` / example1 `ca7e5e2` / minimap `df1383e`,
   host OpenJDK 1.8.0_502): 150s 1614 server run, `PackWire.bind` clean,

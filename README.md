@@ -119,3 +119,18 @@ and exits before booting the server:
   stay private during dev).
 - Docker root-cause fix: non-root image user (see R1); the loud
   `cannot clear <build>` guard in `run-live.sh` stays as defence in depth.
+
+## Java 8 / modern-Java compatibility
+
+Shipped jars stay Java 8 bytecode (major 52, no `module-info`, no
+multi-release) — enforced by `tools/run-live.sh` on every live and release
+run, so the same bytes load on Java 8 and on modern JVMs:
+
+| Runtime | Setup | Proven |
+|---|---|---|
+| Java 8, vanilla Forge 1614 | `sh tools/run-live.sh` | yes (hub `STATE.md`) |
+| Java 17/21 + lwjgl3ify | upstream `forgePatches` + `java9args.txt` | no (procedure only) |
+
+Rules: never raise bytecode above 52, never use post-8 JDK APIs
+(`--release 8` gates), never compile against LWJGL3 — future client
+rendering targets the LWJGL2 API and lets lwjgl3ify redirect it.

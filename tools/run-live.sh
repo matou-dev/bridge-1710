@@ -207,6 +207,31 @@ echo "ok b3-live : jars built (VERSION=$VERSION)"
 normjar "$BLD/jars/matoubridge-reobf.jar"
 echo "ok b3-live : bridge reobfuscated"
 
+# Dual-runtime contract (Java 8 vanilla + modern JVM via lwjgl3ify):
+# shipped bytes stay major 52 with no module-info and no multi-release
+# entries — v52 loads on 8 and 21 alike. Anything newer fails loudly here,
+# on both the live and the release path, never silently.
+python3 - "$BLD/jars" <<'EOF'
+import sys, zipfile, struct
+jars = ["matou-spi.jar", "matou-example1.jar", "matou-minimap.jar",
+        "matoubridge-reobf.jar"]
+bad = []
+for j in jars:
+    zf = zipfile.ZipFile("%s/%s" % (sys.argv[1], j))
+    for n in zf.namelist():
+        if n == "module-info.class" or n.startswith("META-INF/versions/"):
+            bad.append("%s!%s (multi-release)" % (j, n))
+        elif n.endswith(".class"):
+            major = struct.unpack(">H", zf.read(n)[6:8])[0]
+            if major != 52:
+                bad.append("%s!%s (major %d, want 52)" % (j, n, major))
+if bad:
+    print("FAIL b3-live : java-52 contract broken:")
+    print("\n".join("  " + b for b in bad))
+    sys.exit(1)
+print("ok b3-live : java 52 contract (4 jars, no multi-release)")
+EOF
+
 # R2 release assembly: versioned server drop, then exit before booting.
 # The MCP-named bridge jar never ships (only the reobf one is copied).
 if [ "${BUILD_ONLY:-}" = "1" ]; then
