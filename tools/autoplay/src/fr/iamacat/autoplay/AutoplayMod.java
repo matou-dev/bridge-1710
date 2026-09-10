@@ -151,11 +151,15 @@ public class AutoplayMod {
     static final int LOOT_BEAST_DELAY = 5;
     static final int LOOT_TIMEOUT = 600;
     static final boolean SPAWN = "1".equals(System.getenv("SPAWN"));
-    /** Mirrors the content cap ({@code owned.matou mob my_beast cap},
-     * transported by the bridge spawn wire): the companion counts
-     * beasts, the content owns the bound — a drift here fails the proof
-     * loudly instead of asserting a stale cap silently. */
-    static final int SPAWN_CAP = 4;
+    /** Mirrors the effective cap (content {@code owned.matou mob my_beast
+     * cap} default, operator {@code spawn.cap} wins — transported by the
+     * bridge spawn wire): the companion counts beasts, the effective
+     * policy owns the bound — a drift here fails the proof loudly
+     * instead of asserting a stale cap silently. Override proofs set
+     * {@code SPAWN_CAP} to the packs.cfg override (both sides name the
+     * same bound, or the breach check is blind).
+     */
+    static final int SPAWN_CAP = spawnCapOfEnv();
     /** Mirrors the content hp ({@code owned.matou mob my_beast hp} via
      * {@code MatouBridgeMod} spawn wire): the companion polls the landed
      * max health, the bridge owns the value — a drift here fails the
@@ -198,6 +202,29 @@ public class AutoplayMod {
 
     public AutoplayMod() {
         FMLCommonHandler.instance().bus().register(this);
+    }
+
+    /**
+     * Effective cap want: {@code SPAWN_CAP} env wins, default 4 is the
+     * content cap. Loud on garbage — a defaulted bound blinds the
+     * breach check silently otherwise. DEV-only.
+     */
+    private static int spawnCapOfEnv() {
+        String raw = System.getenv("SPAWN_CAP");
+        if (raw == null || raw.isEmpty()) {
+            return 4;
+        }
+        try {
+            int v = Integer.parseInt(raw);
+            if (v <= 0) {
+                throw new NumberFormatException("non-positive");
+            }
+            return v;
+        } catch (RuntimeException bad) {
+            throw new IllegalArgumentException(
+                    "E_AUTOPLAY_SPAWN_CAP:bad <" + raw
+                            + "> (want positive int, default 4)");
+        }
     }
 
     @SubscribeEvent

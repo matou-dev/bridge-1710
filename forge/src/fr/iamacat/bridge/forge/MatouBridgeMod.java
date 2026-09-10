@@ -9,6 +9,7 @@ import cpw.mods.fml.relauncher.Side;
 import fr.iamacat.bridge.ForgeCells;
 import fr.iamacat.bridge.ForgeSnapshot;
 import fr.iamacat.bridge.Packs;
+import fr.iamacat.bridge.wire.OperatorPolicy;
 import fr.iamacat.bridge.spike.MinedStore;
 import fr.iamacat.bridge.spike.RepopJob;
 import fr.iamacat.bridge.spike.RepopSeal;
@@ -62,14 +63,18 @@ import net.minecraftforge.event.world.BlockEvent;
  * so bridge parity holds with behaviour intentionally 1710-only until
  * the spike is proven.
  *
- * <p>Loot (event-sourced, hub decisions/LOOT.md): ore harvests arrive on
- * {@link #onHarvest} (Forge harvest-drops events for the registered ore,
+ * <p>Loot (event-sourced, hub decisions/LOOT.md): harvests of the operator
+ * wire blocks arrive on {@link #onHarvest} (Forge harvest-drops events,
  * server side, dim 0 only) and mob kills on {@link #onKill} (Forge
  * living-drops events, same scope) into the bridge-owned
  * {@link DropStore}; every server tick {@link #lootTick} seals the store
  * plus the wired {@link LootTable} beside the first wire's pack states
  * ({@link LootSeal}, SPI untouched) and the pure {@link LootJob} decides
- * what drops. Due drops land as {@link EntityItem} carriers beside the
+ * what drops. The ore scope is the packs.cfg wire-block column (T2
+ * operator-override tranche, hub decisions/SPAWN.md — no bridge constant
+ * names a loot block); the per-harvest count is the content
+ * {@code drop_count} unless the operator {@code loot.count} wins. Due
+ * drops land as {@link EntityItem} carriers beside the
  * vanilla drops (vanilla behaviour untouched). The carrier is vanilla
  * diamond until item registration lands on the REGISTRATION path; every
  * dim-0 kill pays the single table entry (per-mob filtering is a
@@ -92,7 +97,10 @@ import net.minecraftforge.event.world.BlockEvent;
  * {@code SPAWN=1} (same opt-in as the spike/loot companion proofs):
  * always-on landing would veto the loot proof's own beast once the
  * census fills, so the union and loot runs stay byte-for-byte
- * spawn-free. New refusals stay spawn-local ({@code E_SPAWN_*}, never
+ * spawn-free. The spawn numbers are the content policy unless the
+ * operator {@code spawn.*} wins (T2 operator-override tranche, hub
+ * decisions/SPAWN.md — the bridge transports the effective policy, it
+ * never owns a spawn number). New refusals stay spawn-local ({@code E_SPAWN_*}, never
  * in the {@code E_FORGE_*} parity catalog), so bridge parity holds with
  * behaviour intentionally 1710-only until proven.
  *
@@ -117,28 +125,31 @@ public final class MatouBridgeMod {
     /** Spike scope: vanilla stone only. Other breaks are not the spike's
      * business (metadata/T.E. restore is an explicit non-goal). */
     static final String REPOP_BLOCK = "minecraft:stone";
-    /** Loot scope: the registered ore only (registry name, operator
-     * domain — content names stay in example1). Other harvests are not
-     * the loot's business (fortune/silk modifiers are an explicit
-     * non-goal). T2 moves this to the operator wire block; T1 keeps the
-     * constant, only spawn numbers and the loot count went content-side.
+    /** Loot scope: the operator wire blocks, resolved at wire time (T2
+     * operator-override tranche, hub decisions/SPAWN.md — the packs.cfg
+     * wire-block column names the ore, no bridge constant does; other
+     * harvests are not the loot's business, fortune/silk modifiers stay
+     * explicit non-goals). Wiring the dev stone default therefore pays
+     * stone harvests; every live proof wires the registered ore.
      */
-    static final String LOOT_ORE = "example1:my_ore";
+    private final List<String> oreNames = new ArrayList<String>();
+    private final List<Block> ores = new ArrayList<Block>();
     /** Spawn switch (DEV proof opt-in): landing plus veto stay passive
      * unless {@code SPAWN=1}, so union and loot runs never see a beast. */
     static final boolean SPAWN = "1".equals(System.getenv("SPAWN"));
-    /** Spawn policy, sealed from the content table at wire time (hub
-     * decisions/SPAWN.md content-decides tranche): cap, per-tick budget
-     * and y band the author chose in {@code owned.matou}. The bridge
-     * transports them into the seal, it never owns a spawn number. The
-     * companion mirrors the cap (see its SPAWN_CAP note). */
+    /** Spawn policy, sealed from the content table at wire time unless
+     * the operator {@code spawn.*} wins (hub decisions/SPAWN.md
+     * operator-override tranche): effective cap, per-tick budget and y
+     * band. The bridge transports them into the seal, it never owns a
+     * spawn number. The companion mirrors the effective cap (see its
+     * SPAWN_CAP note). */
     private long spawnCap;
     private long spawnBudget;
     private long spawnYMin;
     private long spawnYMax;
-    /** Loot policy, sealed from the content table at wire time
-     * (content-decides tranche): items per harvest the author chose.
-     * Transported, never owned. */
+    /** Loot policy, sealed from the content table at wire time unless
+     * the operator {@code loot.count} wins (operator-override tranche):
+     * effective items per harvest. Transported, never owned. */
     private long lootCount;
 
     private final List<PackWire> wires = new ArrayList<PackWire>();
@@ -149,7 +160,6 @@ public final class MatouBridgeMod {
     private final SpawnStore census = new SpawnStore();
     private final SpawnJob spawn = new SpawnJob();
     private Block stone;
-    private Block ore;
     private Map<String, String> lootTable;
     private String spawnMob;
     private long spawnHp;
@@ -176,19 +186,23 @@ public final class MatouBridgeMod {
             throw new RuntimeException("E_FORGE_PACKS:unreadable <"
                     + PACKS_PATH + "> (" + e.getMessage() + ")", e);
         }
-        for (Packs.PackSpec spec : Packs.parseLines(lines)) {
+        List<Packs.PackSpec> specs = Packs.parseLines(lines);
+        for (Packs.PackSpec spec : specs) {
             wires.add(PackWire.bind(spec));
         }
-        wireLoot(Packs.parseLines(lines));
-        wireSpawn();
+        wireLoot(specs);
+        wireSpawn(specs);
     }
 
     /**
      * Loot wiring: one table per bridge from the packs' owned content
-     * (parsed once, like registration — never on the tick path). No
-     * owned file anywhere means loot stays passive (Q1 cohabitation):
-     * the hooks gate on the null table. Several distinct owned files
-     * refuse loudly — silent table picks are defaults.
+     * (parsed once, like registration — never on the tick path), the
+     * content {@code drop_count} unless the operator {@code loot.count}
+     * wins, and the ore scope from the operator wire-block column (T2
+     * operator-override tranche — no bridge constant names a loot
+     * block). No owned file anywhere means loot stays passive (Q1
+     * cohabitation): the hooks gate on the null table. Several distinct
+     * owned files refuse loudly — silent table picks are defaults.
      */
     private void wireLoot(List<Packs.PackSpec> specs) {
         Set<String> owned = new HashSet<String>();
@@ -208,14 +222,22 @@ public final class MatouBridgeMod {
         ownedPath = owned.iterator().next();
         LootTable wired = LootTable.fromFile(ownedPath);
         lootTable = wired.drops();
-        lootCount = wired.count();
-        System.out.println("[MatouBridge] loot wired <" + lootTable
-                + "> count <" + lootCount + ">");
-        ore = Block.getBlockFromName(LOOT_ORE);
-        if (ore == null) {
-            throw new IllegalArgumentException("E_LOOT_ORE:unknown <"
-                    + LOOT_ORE + ">");
+        lootCount = OperatorPolicy.effectiveLootCount(wired.count(), specs);
+        for (String name : OperatorPolicy.wireBlocks(specs)) {
+            Block block = Block.getBlockFromName(name);
+            if (block == null) {
+                throw new IllegalArgumentException("E_LOOT_ORE:unknown <"
+                        + name + ">");
+            }
+            oreNames.add(name);
+            ores.add(block);
         }
+        String lootNote = OperatorPolicy.present(specs,
+                OperatorPolicy.LOOT_COUNT) ? " overridden <loot.count>"
+                : "";
+        System.out.println("[MatouBridge] loot wired <" + lootTable
+                + "> count <" + lootCount + "> ore <" + oreNames + ">"
+                + lootNote);
         if (Items.diamond == null) {
             throw new IllegalArgumentException(
                     "E_LOOT_GEM:unknown <minecraft:diamond>");
@@ -223,31 +245,61 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Spawn wiring: the single mob ref plus its spec hp plus its
-     * authorial spawn policy from the same owned content the loot table
+     * Spawn wiring: the single mob ref plus its spec hp plus the
+     * effective spawn policy from the same owned content the loot table
      * came from (parsed once, like registration — never on the tick
-     * path). The hp lands on the beast's max-health attribute at every
-     * landing (hp tranche, hub decisions/SPAWN.md) — a spec field with no
-     * live reader would be a silent default; the same holds for cap,
-     * budget and band (content-decides tranche). No owned file anywhere
-     * means spawn stays passive (Q1 cohabitation): the hooks gate on the
-     * null mob.
+     * path): content cap/budget/band unless the operator
+     * {@code spawn.*} wins (T2 operator-override tranche). The hp lands
+     * on the beast's max-health attribute at every landing (hp tranche,
+     * hub decisions/SPAWN.md) — a spec field with no live reader would
+     * be a silent default; the same holds for the effective policy. No
+     * owned file anywhere means spawn stays passive (Q1 cohabitation):
+     * the hooks gate on the null mob.
      */
-    private void wireSpawn() {
+    private void wireSpawn(List<Packs.PackSpec> specs) {
         if (ownedPath == null) {
             return;
         }
         SpawnTable table = SpawnTable.fromFile(ownedPath);
         spawnMob = table.mob();
         spawnHp = table.hp();
-        spawnCap = table.cap();
-        spawnBudget = table.budget();
-        spawnYMin = table.yMin();
-        spawnYMax = table.yMax();
+        long[] eff = OperatorPolicy.effectiveSpawn(table.cap(),
+                table.budget(), table.yMin(), table.yMax(), specs);
+        spawnCap = eff[0];
+        spawnBudget = eff[1];
+        spawnYMin = eff[2];
+        spawnYMax = eff[3];
+        List<String> over = new ArrayList<String>();
+        if (OperatorPolicy.present(specs, OperatorPolicy.SPAWN_CAP)) {
+            over.add("cap");
+        }
+        if (OperatorPolicy.present(specs, OperatorPolicy.SPAWN_BUDGET)) {
+            over.add("budget");
+        }
+        if (OperatorPolicy.present(specs, OperatorPolicy.SPAWN_Y_MIN)) {
+            over.add("y_min");
+        }
+        if (OperatorPolicy.present(specs, OperatorPolicy.SPAWN_Y_MAX)) {
+            over.add("y_max");
+        }
+        String spawnNote = over.isEmpty() ? ""
+                : " overridden <" + join(over) + ">";
         System.out.println("[MatouBridge] spawn wired <" + spawnMob
                 + "> hp <" + spawnHp + "> cap <" + spawnCap
                 + "> budget <" + spawnBudget + "> y <" + spawnYMin
-                + ".." + spawnYMax + ">");
+                + ".." + spawnYMax + ">" + spawnNote);
+    }
+
+    /** Comma join for the override log suffix (Java 8, no extra dep). */
+    private static String join(List<String> parts) {
+        StringBuilder out = new StringBuilder();
+        for (String p : parts) {
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(p);
+        }
+        return out.toString();
     }
 
     /**
@@ -294,7 +346,7 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Loot record: a server-side dim-0 harvest of the registered ore
+     * Loot record: a server-side dim-0 harvest of an operator wire block
      * becomes an ore harvest at the last server tick (same clock the
      * per-tick seal reads — both run on the server thread). Client-side
      * echoes (isRemote) are ignored: the server fires its own event for
@@ -312,7 +364,7 @@ public final class MatouBridgeMod {
         if (event.world.provider.dimensionId != 0) {
             return;
         }
-        if (event.block != ore) {
+        if (!ores.contains(event.block)) {
             return;
         }
         String harvest = Cell.of(event.x, event.y, event.z,

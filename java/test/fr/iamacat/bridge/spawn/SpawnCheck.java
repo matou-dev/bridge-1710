@@ -1,12 +1,16 @@
 package fr.iamacat.bridge.spawn;
 
 import fr.iamacat.bridge.ForgeSnapshot;
+import fr.iamacat.bridge.Packs;
+import fr.iamacat.bridge.wire.OperatorPolicy;
 import fr.iamacat.example1.SpawnJob;
 import fr.iamacat.example1.SpawnTable;
 import fr.iamacat.spi.MatouId;
 import fr.iamacat.spi.Snapshot;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -72,6 +76,24 @@ public final class SpawnCheck {
         s.record("11", "1,66,2:" + MOB, 100L);
         s.record("23", "3,67,4:" + MOB, 110L);
         return s;
+    }
+
+    private static Packs.PackSpec spec(String block, String... kv) {
+        Map<String, String> args = new LinkedHashMap<String, String>();
+        args.put("ownedFile", "o");
+        for (int i = 0; i < kv.length; i += 2) {
+            args.put(kv[i], kv[i + 1]);
+        }
+        return new Packs.PackSpec("fr.iamacat.example1.ExamplePack", 63,
+                block, args);
+    }
+
+    private static List<Packs.PackSpec> specs(Packs.PackSpec... ss) {
+        List<Packs.PackSpec> out = new ArrayList<Packs.PackSpec>();
+        for (Packs.PackSpec s : ss) {
+            out.add(s);
+        }
+        return out;
     }
 
     public static void main(String[] args) {
@@ -234,6 +256,111 @@ public final class SpawnCheck {
                                 + " x" + budget);
             }
         }
+
+        // Operator overrides (T2, hub decisions/SPAWN.md): absent means
+        // content, present wins, bad refuses loudly — the same rule the
+        // forge wire consumes, exercised here through the shipped
+        // OperatorPolicy.
+        SpawnTable content = table();
+        long[] eff = OperatorPolicy.effectiveSpawn(content.cap(),
+                content.budget(), content.yMin(), content.yMax(),
+                specs(spec("example1:my_ore")));
+        check(eff[0] == 4L && eff[1] == 1L && eff[2] == 66L
+                && eff[3] == 68L, "operator absent means content policy");
+        long[] over = OperatorPolicy.effectiveSpawn(content.cap(),
+                content.budget(), content.yMin(), content.yMax(),
+                specs(spec("example1:my_ore", "spawn.cap", "2")));
+        check(over[0] == 2L && over[1] == 1L && over[2] == 66L
+                && over[3] == 68L,
+                "operator spawn.cap wins over content");
+        long[] full = OperatorPolicy.effectiveSpawn(content.cap(),
+                content.budget(), content.yMin(), content.yMax(),
+                specs(spec("example1:my_ore", "spawn.cap", "2",
+                        "spawn.budget", "2", "spawn.y_min", "60",
+                        "spawn.y_max", "61")));
+        check(full[0] == 2L && full[1] == 2L && full[2] == 60L
+                && full[3] == 61L, "operator full policy wins over content");
+        check(!OperatorPolicy.present(
+                specs(spec("example1:my_ore")), OperatorPolicy.SPAWN_CAP),
+                "absent key is not present");
+        check(OperatorPolicy.present(
+                specs(spec("example1:my_ore", "spawn.cap", "2")),
+                OperatorPolicy.SPAWN_CAP), "present key is present");
+        SpawnStore empty = new SpawnStore();
+        Map<MatouId, Object> overStates = SpawnSeal.seal(empty, MOB,
+                full[0], full[1], full[2], full[3]);
+        List<String> overDue = job.decide(
+                ForgeSnapshot.snapshot(10L, overStates));
+        check(overDue.size() == 2 && overDue.size() == empty.slotsDue(
+                (int) full[0], (int) full[1])
+                && overDue.get(0).matches(
+                        "[0-9]+,6[01],[0-9]+:example1\\.content:my_beast"),
+                "overridden policy seals and decides 2 slots on its band");
+        final SpawnTable contentCap = content;
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(contentCap.cap(),
+                        contentCap.budget(), contentCap.yMin(),
+                        contentCap.yMax(), specs(spec("example1:my_ore",
+                                "spawn.cap", "0")));
+            }
+        }, "zero operator cap");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(contentCap.cap(),
+                        contentCap.budget(), contentCap.yMin(),
+                        contentCap.yMax(), specs(spec("example1:my_ore",
+                                "spawn.cap", "-1")));
+            }
+        }, "negative operator cap");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(contentCap.cap(),
+                        contentCap.budget(), contentCap.yMin(),
+                        contentCap.yMax(), specs(spec("example1:my_ore",
+                                "spawn.cap", "x")));
+            }
+        }, "non-numeric operator cap");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(contentCap.cap(),
+                        contentCap.budget(), contentCap.yMin(),
+                        contentCap.yMax(),
+                        specs(spec("example1:my_ore", "spawn.cap", "2"),
+                                spec("example1:my_ore",
+                                        "spawn.cap", "3")));
+            }
+        }, "differing operator cap");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(contentCap.cap(),
+                        contentCap.budget(), contentCap.yMin(),
+                        contentCap.yMax(), specs(spec("example1:my_ore",
+                                "spawn.cpa", "2")));
+            }
+        }, "unknown operator key");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(contentCap.cap(),
+                        contentCap.budget(), contentCap.yMin(),
+                        contentCap.yMax(), specs(spec("example1:my_ore",
+                                "spawn.y_min", "70")));
+            }
+        }, "operator band inverting content");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(contentCap.cap(),
+                        contentCap.budget(), contentCap.yMin(),
+                        contentCap.yMax(), specs(spec("example1:my_ore",
+                                "spawn.y_min", "68",
+                                "spawn.y_max", "66")));
+            }
+        }, "operator inverted band");
+        expectNPE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, null);
+            }
+        }, "null specs");
         System.out.println("ok spike-spawn : all");
     }
 }

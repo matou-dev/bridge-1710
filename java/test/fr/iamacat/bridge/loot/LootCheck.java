@@ -1,6 +1,8 @@
 package fr.iamacat.bridge.loot;
 
 import fr.iamacat.bridge.ForgeSnapshot;
+import fr.iamacat.bridge.Packs;
+import fr.iamacat.bridge.wire.OperatorPolicy;
 import fr.iamacat.example1.LootJob;
 import fr.iamacat.example1.LootTable;
 import fr.iamacat.spi.MatouId;
@@ -74,6 +76,24 @@ public final class LootCheck {
         s.record("8,10,8:" + LootJob.ORE, 100L);
         s.record("12,10,8:" + LootJob.BEAST, 110L);
         return s;
+    }
+
+    private static Packs.PackSpec spec(String block, String... kv) {
+        Map<String, String> args = new LinkedHashMap<String, String>();
+        args.put("ownedFile", "o");
+        for (int i = 0; i < kv.length; i += 2) {
+            args.put(kv[i], kv[i + 1]);
+        }
+        return new Packs.PackSpec("fr.iamacat.example1.ExamplePack", 63,
+                block, args);
+    }
+
+    private static List<Packs.PackSpec> specs(Packs.PackSpec... ss) {
+        List<Packs.PackSpec> out = new ArrayList<Packs.PackSpec>();
+        for (Packs.PackSpec s : ss) {
+            out.add(s);
+        }
+        return out;
     }
 
     /**
@@ -213,6 +233,90 @@ public final class LootCheck {
                                 + " x" + count);
             }
         }
+
+        // Operator overrides (T2, hub decisions/SPAWN.md): absent means
+        // content, present wins, bad refuses loudly — the same rule the
+        // forge wire consumes, exercised here through the shipped
+        // OperatorPolicy. The ore scope is the wire-block column, never
+        // a bridge constant.
+        final long contentCount = tableCount();
+        check(OperatorPolicy.effectiveLootCount(contentCount,
+                specs(spec("example1:my_ore"))) == 1L,
+                "operator absent means content count");
+        check(OperatorPolicy.effectiveLootCount(contentCount,
+                specs(spec("example1:my_ore", "loot.count", "2"))) == 2L,
+                "operator loot.count wins over content");
+        DropStore cs = new DropStore();
+        cs.record("8,10,8:" + LootJob.ORE, 100L);
+        cs.record("12,10,8:" + LootJob.BEAST, 110L);
+        long overCount = OperatorPolicy.effectiveLootCount(contentCount,
+                specs(spec("example1:my_ore", "loot.count", "2")));
+        Map<MatouId, Object> overStates =
+                LootSeal.seal(cs, wires, overCount);
+        check(job.decide(ForgeSnapshot.snapshot(110L, overStates)).equals(
+                expand(seeded().claimDue(110L), wires, 2L)),
+                "overridden count seals and decides the x2 expansion");
+        List<String> one = OperatorPolicy.wireBlocks(
+                specs(spec("example1:my_ore")));
+        check(one.size() == 1 && one.get(0).equals("example1:my_ore"),
+                "wire block names the loot ore scope");
+        List<String> ordered = OperatorPolicy.wireBlocks(specs(
+                spec("example1:my_ore"), spec("minecraft:stone")));
+        check(ordered.size() == 2
+                && ordered.get(0).equals("example1:my_ore")
+                && ordered.get(1).equals("minecraft:stone"),
+                "wire blocks keep line order");
+        List<String> dedup = OperatorPolicy.wireBlocks(specs(
+                spec("example1:my_ore"), spec("example1:my_ore")));
+        check(dedup.size() == 1
+                && dedup.get(0).equals("example1:my_ore"),
+                "duplicate wire blocks dedupe");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveLootCount(contentCount,
+                        specs(spec("example1:my_ore",
+                                "loot.count", "0")));
+            }
+        }, "zero operator count");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveLootCount(contentCount,
+                        specs(spec("example1:my_ore",
+                                "loot.count", "-1")));
+            }
+        }, "negative operator count");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveLootCount(contentCount,
+                        specs(spec("example1:my_ore",
+                                "loot.count", "x")));
+            }
+        }, "non-numeric operator count");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveLootCount(contentCount,
+                        specs(spec("example1:my_ore", "loot.count", "1"),
+                                spec("example1:my_ore",
+                                        "loot.count", "2")));
+            }
+        }, "differing operator count");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveLootCount(contentCount,
+                        specs(spec("example1:my_ore",
+                                "loot.cout", "2")));
+            }
+        }, "unknown operator key");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.wireBlocks(specs(spec("my_ore")));
+            }
+        }, "bare wire block");
+        expectNPE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveLootCount(1L, null);
+            }
+        }, "null specs");
         System.out.println("ok spike-loot : all");
     }
 }
