@@ -80,7 +80,9 @@ if [ -z "${MC_JAR:-}" ]; then
   echo "skip forge (no MC_JAR)"
 else
   [ -f "$MC_JAR" ] || { echo "FAIL forge : MC_JAR=<$MC_JAR> missing"; exit 1; }
-  mkdir -p forge/build
+  # Clean before compile: javac never deletes stale classes, so a renamed or
+  # deleted source would linger in forge/build and lie to surface scans.
+  rm -rf forge/build && mkdir -p forge/build
   javac --release 8 -cp "java/build:$MC_JAR" -d forge/build $(find forge/src -name '*.java')
   echo "ok (forge-1614)"
 fi
