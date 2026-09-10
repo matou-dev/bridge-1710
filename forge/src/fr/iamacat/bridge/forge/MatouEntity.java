@@ -11,9 +11,11 @@ import net.minecraft.world.World;
  * renderer per content. One generic subclass, never one per content,
  * never a shadow field. The census, the join veto, the reconcile poll
  * and the kill hook all match this class: vanilla pigs are a different
- * species now (ignored by the census, never vetoed). Tranche 1 keeps
- * vanilla pig health: the content {@code hp} rides the spec unapplied
- * until the attribute seam lands (re-opener, never a silent default).
+ * species now (ignored by the census, never vetoed). The content
+ * {@code hp} lands on the beast's max-health attribute at every landing
+ * ({@code MatouBridgeMod.landBeast}, hp tranche — read back tripwired,
+ * never a silent default); the vanilla pig renderer mapping stays until
+ * the custom-renderer tranche.
  * Only this package may import {@code net.minecraft} /
  * {@code cpw.mods}.
  */

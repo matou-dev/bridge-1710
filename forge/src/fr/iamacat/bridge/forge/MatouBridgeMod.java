@@ -34,6 +34,8 @@ import java.util.Map;
 import java.util.Set;
 import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
@@ -152,6 +154,7 @@ public final class MatouBridgeMod {
     private Block ore;
     private Map<String, String> lootTable;
     private String spawnMob;
+    private long spawnHp;
     private String ownedPath;
     private long tick;
 
@@ -218,16 +221,23 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Spawn wiring: the single mob ref from the same owned content the
-     * loot table came from (parsed once, like registration — never on
-     * the tick path). No owned file anywhere means spawn stays passive
+     * Spawn wiring: the single mob ref plus its spec hp from the same
+     * owned content the loot table came from (parsed once, like
+     * registration — never on the tick path). The hp lands on the
+     * beast's max-health attribute at every landing (hp tranche, hub
+     * decisions/SPAWN.md) — a spec field with no live reader would be a
+     * silent default. No owned file anywhere means spawn stays passive
      * (Q1 cohabitation): the hooks gate on the null mob.
      */
     private void wireSpawn() {
         if (ownedPath == null) {
             return;
         }
-        spawnMob = SpawnTable.fromFile(ownedPath).mob();
+        SpawnTable table = SpawnTable.fromFile(ownedPath);
+        spawnMob = table.mob();
+        spawnHp = table.hp();
+        System.out.println("[MatouBridge] spawn wired <" + spawnMob
+                + "> hp <" + spawnHp + ">");
     }
 
     /**
@@ -481,19 +491,32 @@ public final class MatouBridgeMod {
 
     /**
      * Spawn landing: one registered beast per due slot at the decided
-     * pad, recorded into the census under its entity id. A refused spawn
-     * fails loudly — an unrecorded beast is census drift silently
-     * otherwise.
+     * pad, recorded into the census under its entity id. The content hp
+     * lands on the beast's max-health attribute before the spawn (hp
+     * tranche, hub decisions/SPAWN.md) and the read-back is tripwired:
+     * a beast that does not carry the spec hp fails the tick instead of
+     * roaming underpowered silently. A refused spawn fails loudly — an
+     * unrecorded beast is census drift silently otherwise.
      *
      * <p>Owner discipline (measured live on loot: NoSuchFieldError posX):
      * reobf only walks in-jar superclass chains, and stub supertypes
      * never ship — so inherited vanilla members go through the declaring
-     * stub type ({@code Entity}), never through the beast.
+     * stub type ({@code Entity}, {@code EntityLivingBase},
+     * {@code SharedMonsterAttributes}), never through the beast.
      */
     private void landBeast(World world, int x, int y, int z, String cell,
             long now) {
         MatouEntity beast = new MatouEntity(world);
         Entity body = beast;
+        EntityLivingBase living = beast;
+        living.getEntityAttribute(SharedMonsterAttributes.maxHealth)
+                .setBaseValue((double) spawnHp);
+        living.setHealth((float) spawnHp);
+        if (living.getMaxHealth() != (float) spawnHp) {
+            throw new IllegalStateException("E_SPAWN_HP:diverged <want="
+                    + spawnHp + " got=" + living.getMaxHealth()
+                    + "> at tick " + now);
+        }
         body.setPositionAndRotation(x + 0.5, y, z + 0.5, 0.0f, 0.0f);
         if (!world.spawnEntityInWorld(beast)) {
             throw new IllegalStateException("E_SPAWN_SPAWN:refused <" + x

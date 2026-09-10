@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
@@ -101,9 +102,12 @@ import net.minecraftforge.event.world.BlockEvent;
  * (past cap fails loudly — the veto owns that bound), kills the first
  * beast past SPAWN_KILL_TICK with a simulated {@code LivingDropsEvent}
  * post (loot honesty standard — the kill pays through the loot table,
- * proving the spawn-to-loot chain), then polls the diamond carrier at
- * the kill spot. A missing beast, a breached cap, or a missing carrier
- * fails loudly (E_SPAWN_PROOF) and shuts the game down for post-mortem.
+   * proving the spawn-to-loot chain), then polls the diamond carrier at
+   * the kill spot. The first living beast's max health is polled once
+   * against SPAWN_HP (hp tranche — the bridge applies the content hp
+   * per landing; a diverged read-back fails loudly here too). A missing
+   * beast, a breached cap, or a missing carrier
+   * fails loudly (E_SPAWN_PROOF) and shuts the game down for post-mortem.
  * Without SPAWN=1 nothing here runs and the proof is byte-for-byte the
  * proven union run.
  *
@@ -151,6 +155,11 @@ public class AutoplayMod {
      * beasts, the bridge owns the bound — a drift here fails the proof
      * loudly instead of asserting a stale cap silently. */
     static final int SPAWN_CAP = 4;
+    /** Mirrors the content hp ({@code owned.matou mob my_beast hp} via
+     * {@code MatouBridgeMod} spawn wire): the companion polls the landed
+     * max health, the bridge owns the value — a drift here fails the
+     * proof loudly instead of asserting a stale hp silently. */
+    static final float SPAWN_HP = 20.0f;
     static final int SPAWN_KILL_TICK = 1000;
     static final int SPAWN_TIMEOUT = 600;
 
@@ -169,6 +178,7 @@ public class AutoplayMod {
     volatile int oreDropTick = -1;
     volatile int beastDropTick = -1;
     volatile boolean pigSeen = false;
+    volatile boolean hpSeen = false;
     volatile int maxPigs = 0;
     volatile int firstPigTick = -1;
     volatile boolean pigKilled = false;
@@ -513,6 +523,20 @@ public class AutoplayMod {
             firstPigTick = worldTicks;
             System.out.println("[MatouAutoplay] spawn first beast at "
                     + "worldTick " + firstPigTick);
+        }
+        if (!hpSeen && first != null) {
+            // Owner discipline (measured live on loot): inherited vanilla
+            // members go through the declaring stub type, never the beast.
+            EntityLivingBase living = first;
+            float hp = living.getMaxHealth();
+            if (hp != SPAWN_HP) {
+                spawnFail("hp diverged <want=" + SPAWN_HP + " got=" + hp
+                        + "> at worldTick " + worldTicks);
+                return;
+            }
+            hpSeen = true;
+            System.out.println("[MatouAutoplay] spawn hp <" + hp
+                    + "> at worldTick " + worldTicks);
         }
         if (pigs > SPAWN_CAP) {
             spawnFail("cap breached <" + pigs + " > " + SPAWN_CAP
