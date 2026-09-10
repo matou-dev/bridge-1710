@@ -138,7 +138,10 @@ echo "ok b3-live : server provisioned (pins verified)"
 # 2b. Pin every stubbed Forge member against the provisioned 1614 universal.
 #     Forge classes are never obfuscated, so names are final — presence is
 #     the pin. (Vanilla-typed Forge members reference obfuscated classes in
-#     the universal, which is why forge/ compiles against stubs, not it.)
+#     the universal, which is why forge/ compiles against stubs, not it.
+#     The obf name below is 1614-pinned bytes like the universal sha1
+#     above: aji takes String and returns aji, the getBlockFromName shape,
+#     so aji is Block here.)
 pin_uni() {
   "$J8/javap" -p -cp "$UNI" "$1" 2>/dev/null | grep -q "$2" \
     || { echo "FAIL b3-live : universal pin unmet <$1 :: $2>"; exit 1; }
@@ -160,7 +163,7 @@ pin_uni 'net.minecraftforge.event.world.BlockEvent' 'public final int z;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent' ' world;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent' ' block;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent$BreakEvent' 'BreakEvent('
-pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerBlock(net.minecraft.block.Block, java.lang.String)'
+pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerBlock(aji, java.lang.String)'
 pin_uni 'cpw.mods.fml.common.event.FMLPreInitializationEvent' 'FMLPreInitializationEvent('
 echo "ok b3-live : forge stubs pinned to universal"
 
