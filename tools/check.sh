@@ -38,15 +38,14 @@ if [ -n "$const_hits" ]; then
   exit 1
 fi
 echo "ok (no-stub-const)"
-# T3 registry gate : java/ pur ne connait aucun contenu par import — le
-# vocabulaire partage passe par le SPI (hub
-# decisions/SPI_STATE_VOCABULARY.md), jamais par un import lateral
-# (AGENTS.md sect. 3). Seuls les imports comptent : les commentaires
-# peuvent les nommer. Les tests gardent leurs imports (le comparateur
-# lit les deux cotes) ; forge/ garde les siens jusqu'au T4 pack-driven
-# (tables + jobs + kinds, re-opener nomme).
+# T3 registry gate, closed by T4 pack-driven (hub
+# decisions/SPI_STATE_VOCABULARY.md): neither java/ nor forge/ knows any
+# content by import — tables, jobs and kinds ride the SPI PolicyPack
+# served by the reflectively loaded pack (AGENTS.md sect. 3). Seuls les
+# imports comptent : les commentaires peuvent les nommer. Les tests
+# gardent leurs imports (le comparateur lit les deux cotes).
 ex1_hits=$(rg -n --no-heading "^\s*import\s+fr\.iamacat\.example1" \
-  java/src || true)
+  java/src forge/src || true)
 if [ -n "$ex1_hits" ]; then
   echo "FAIL no-lateral-import :"
   echo "$ex1_hits"
