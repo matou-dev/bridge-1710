@@ -3,10 +3,14 @@ package fr.iamacat.bridge.spawn;
 import fr.iamacat.bridge.ForgeSnapshot;
 import fr.iamacat.bridge.Packs;
 import fr.iamacat.bridge.wire.OperatorPolicy;
+import fr.iamacat.example1.ExamplePack;
 import fr.iamacat.example1.SpawnJob;
 import fr.iamacat.example1.SpawnTable;
+import fr.iamacat.spi.LootStates;
 import fr.iamacat.spi.MatouId;
 import fr.iamacat.spi.Snapshot;
+import fr.iamacat.spi.SpawnStates;
+import fr.iamacat.spi.StateVocabulary;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -63,10 +67,17 @@ public final class SpawnCheck {
                 "../example1/content/owned.matou");
     }
 
+    private static StateVocabulary vocab() {
+        // T3 provision path: the vocabulary the forge wire serves from
+        // the reflectively loaded pack — the gate drives the shipped
+        // seal through it, never through job imports.
+        return new ExamplePack().vocabulary(SpawnStates.SCOPE);
+    }
+
     private static Snapshot seal(SpawnStore store, long tick) {
         SpawnTable wired = table();
         Map<MatouId, Object> states =
-                SpawnSeal.seal(store, wired.mob(), wired.cap(),
+                SpawnSeal.seal(vocab(), store, wired.mob(), wired.cap(),
                         wired.budget(), wired.yMin(), wired.yMax());
         return ForgeSnapshot.snapshot(tick, states);
     }
@@ -187,8 +198,9 @@ public final class SpawnCheck {
         // Seal: contents, copy isolation, refusals (the helper above
         // routes through the shipped SpawnSeal, so every assertion below
         // exercises the live path).
-        Map<MatouId, Object> st = SpawnSeal.seal(seeded(), MOB,
-                wired.cap(), wired.budget(), wired.yMin(), wired.yMax());
+        Map<MatouId, Object> st = SpawnSeal.seal(vocab(), seeded(),
+                MOB, wired.cap(), wired.budget(), wired.yMin(),
+                wired.yMax());
         check(st.get(SpawnJob.CENSUS) instanceof Map,
                 "seal carries example1.spawn:census");
         check(MOB.equals(st.get(SpawnJob.TABLE)),
@@ -200,44 +212,68 @@ public final class SpawnCheck {
         check(Arrays.asList(Long.valueOf(wired.yMin()),
                 Long.valueOf(wired.yMax())).equals(
                 st.get(SpawnJob.Y)), "seal carries example1.spawn:y");
+        check(new ArrayList<MatouId>(st.keySet()).equals(Arrays.asList(
+                SpawnJob.CENSUS, SpawnJob.TABLE, SpawnJob.CAP,
+                SpawnJob.BUDGET, SpawnJob.Y)),
+                "seal keys follow the vocabulary order");
         SpawnStore iso = new SpawnStore();
         iso.record("1", "1,66,2:" + MOB, 5L);
-        Map<MatouId, Object> snap0 = SpawnSeal.seal(iso, MOB,
-                wired.cap(), wired.budget(), wired.yMin(), wired.yMax());
+        Map<MatouId, Object> snap0 = SpawnSeal.seal(vocab(), iso,
+                MOB, wired.cap(), wired.budget(), wired.yMin(),
+                wired.yMax());
         iso.record("2", "9,67,9:" + MOB, 6L);
         check(((Map<?, ?>) snap0.get(SpawnJob.CENSUS)).size() == 1,
                 "sealed census is a copy, later records never leak");
         final SpawnStore nullStore = null;
         expectNPE(new Runnable() {
             @Override public void run() {
-                SpawnSeal.seal(nullStore, MOB, 4L, 1L, 66L, 68L);
+                SpawnSeal.seal(null, nullStore, MOB, 4L, 1L, 66L, 68L);
+            }
+        }, "null vocabulary");
+        expectNPE(new Runnable() {
+            @Override public void run() {
+                SpawnSeal.seal(vocab(), nullStore, MOB, 4L, 1L, 66L,
+                        68L);
             }
         }, "null store");
         expectNPE(new Runnable() {
             @Override public void run() {
-                SpawnSeal.seal(seeded(), null, 4L, 1L, 66L, 68L);
+                SpawnSeal.seal(vocab(), seeded(), null, 4L, 1L, 66L,
+                        68L);
             }
         }, "null mob");
         expectIAE(new Runnable() {
             @Override public void run() {
-                SpawnSeal.seal(seeded(), "my_beast", 4L, 1L, 66L, 68L);
+                SpawnSeal.seal(vocab(), seeded(), "my_beast", 4L, 1L,
+                        66L, 68L);
             }
         }, "bare mob ref");
         expectIAE(new Runnable() {
             @Override public void run() {
-                SpawnSeal.seal(seeded(), MOB, 0L, 1L, 66L, 68L);
+                SpawnSeal.seal(vocab(), seeded(), MOB, 0L, 1L, 66L,
+                        68L);
             }
         }, "zero cap");
         expectIAE(new Runnable() {
             @Override public void run() {
-                SpawnSeal.seal(seeded(), MOB, 4L, 0L, 66L, 68L);
+                SpawnSeal.seal(vocab(), seeded(), MOB, 4L, 0L, 66L,
+                        68L);
             }
         }, "zero budget");
         expectIAE(new Runnable() {
             @Override public void run() {
-                SpawnSeal.seal(seeded(), MOB, 4L, 1L, 68L, 66L);
+                SpawnSeal.seal(vocab(), seeded(), MOB, 4L, 1L, 68L,
+                        66L);
             }
         }, "inverted y");
+        final StateVocabulary foreign =
+                new ExamplePack().vocabulary(LootStates.SCOPE);
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                SpawnSeal.seal(foreign, seeded(), MOB, 4L, 1L, 66L,
+                        68L);
+            }
+        }, "loot vocabulary into spawn seal");
 
         // Comparateur: budgeted slots over the census equal the job
         // decision size tick by tick over the same sealed states (same
@@ -247,7 +283,7 @@ public final class SpawnCheck {
                 int viaStore = seeded().slotsDue(
                         (int) wired.cap(), budget);
                 Map<MatouId, Object> states = SpawnSeal.seal(
-                        seeded(), MOB, wired.cap(), budget,
+                        vocab(), seeded(), MOB, wired.cap(), budget,
                         wired.yMin(), wired.yMax());
                 List<String> viaJob = job.decide(
                         ForgeSnapshot.snapshot(tick, states));
@@ -287,8 +323,8 @@ public final class SpawnCheck {
                 specs(spec("example1:my_ore", "spawn.cap", "2")),
                 OperatorPolicy.SPAWN_CAP), "present key is present");
         SpawnStore empty = new SpawnStore();
-        Map<MatouId, Object> overStates = SpawnSeal.seal(empty, MOB,
-                full[0], full[1], full[2], full[3]);
+        Map<MatouId, Object> overStates = SpawnSeal.seal(vocab(), empty,
+                MOB, full[0], full[1], full[2], full[3]);
         List<String> overDue = job.decide(
                 ForgeSnapshot.snapshot(10L, overStates));
         check(overDue.size() == 2 && overDue.size() == empty.slotsDue(

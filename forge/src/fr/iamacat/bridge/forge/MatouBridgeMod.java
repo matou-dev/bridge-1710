@@ -22,8 +22,13 @@ import fr.iamacat.example1.LootTable;
 import fr.iamacat.example1.SpawnJob;
 import fr.iamacat.example1.SpawnTable;
 import fr.iamacat.spi.Cell;
+import fr.iamacat.spi.ContentPack;
+import fr.iamacat.spi.LootStates;
 import fr.iamacat.spi.MatouId;
 import fr.iamacat.spi.Snapshot;
+import fr.iamacat.spi.SpawnStates;
+import fr.iamacat.spi.StateVocabulary;
+import fr.iamacat.spi.VocabularyPack;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -69,8 +74,9 @@ import net.minecraftforge.event.world.BlockEvent;
  * living-drops events, same scope) into the bridge-owned
  * {@link DropStore}; every server tick {@link #lootTick} seals the store
  * plus the wired {@link LootTable} beside the first wire's pack states
- * ({@link LootSeal}, SPI untouched) and the pure {@link LootJob} decides
- * what drops. The ore scope is the packs.cfg wire-block column (T2
+ * (the pack-served loot vocabulary, T3 registry — hub
+ * {@code decisions/SPI_STATE_VOCABULARY.md}) and the pure {@link LootJob}
+ * decides what drops. The ore scope is the packs.cfg wire-block column (T2
  * operator-override tranche, hub decisions/SPAWN.md — no bridge constant
  * names a loot block); the per-harvest count is the content
  * {@code drop_count} unless the operator {@code loot.count} wins. Due
@@ -85,7 +91,8 @@ import net.minecraftforge.event.world.BlockEvent;
  * <p>Spawn (event-sourced, hub decisions/SPAWN.md): the pure
  * {@link SpawnJob} reads the bridge-owned {@link SpawnStore} census plus
  * the wired {@link SpawnTable} beside the first wire's pack states
- * ({@link SpawnSeal}, SPI untouched) and decides budgeted spawns; due
+ * (the pack-served spawn vocabulary, T3 registry — hub
+ * {@code decisions/SPI_STATE_VOCABULARY.md}) and decides budgeted spawns; due
  * spawns land as the registered custom beast ({@link MatouEntity}, pig
  * shape and renderer reused — registration-path tranche, hub
  * decisions/REGISTRATION.md). A live {@code slots != due} divergence
@@ -161,7 +168,9 @@ public final class MatouBridgeMod {
     private final SpawnJob spawn = new SpawnJob();
     private Block stone;
     private Map<String, String> lootTable;
+    private StateVocabulary lootVocab;
     private String spawnMob;
+    private StateVocabulary spawnVocab;
     private long spawnHp;
     private String ownedPath;
     private long tick;
@@ -195,6 +204,30 @@ public final class MatouBridgeMod {
     }
 
     /**
+     * T3 vocabulary provision (hub
+     * {@code decisions/SPI_STATE_VOCABULARY.md}): the seal vocabularies
+     * come from the first wire's reflectively loaded pack at wire time
+     * (parse-once, never on the tick path — the seals merge beside that
+     * same wire's states), so seals share the job's ids with no new
+     * bridge-to-content compile edge. A pack serving no vocabulary
+     * refuses loudly — sealing under a guessed id would be a silent
+     * default; the pack's own unknown-scope refusal propagates untouched.
+     */
+    private StateVocabulary vocabulary(String scope, String code) {
+        if (wires.isEmpty()) {
+            throw new IllegalStateException(code + ":nowire (want a "
+                    + "wired pack to serve the " + scope + " vocabulary)");
+        }
+        ContentPack pack = wires.get(0).pack();
+        if (!(pack instanceof VocabularyPack)) {
+            throw new IllegalArgumentException(code + ":novocab <"
+                    + pack.getClass().getName() + "> (pack serves no "
+                    + scope + " vocabulary)");
+        }
+        return ((VocabularyPack) pack).vocabulary(scope);
+    }
+
+    /**
      * Loot wiring: one table per bridge from the packs' owned content
      * (parsed once, like registration — never on the tick path), the
      * content {@code drop_count} unless the operator {@code loot.count}
@@ -220,6 +253,7 @@ public final class MatouBridgeMod {
                     + owned + "> (one table per bridge)");
         }
         ownedPath = owned.iterator().next();
+        lootVocab = vocabulary(LootStates.SCOPE, "E_LOOT_SEAL");
         LootTable wired = LootTable.fromFile(ownedPath);
         lootTable = wired.drops();
         lootCount = OperatorPolicy.effectiveLootCount(wired.count(), specs);
@@ -260,6 +294,7 @@ public final class MatouBridgeMod {
         if (ownedPath == null) {
             return;
         }
+        spawnVocab = vocabulary(SpawnStates.SCOPE, "E_SPAWN_SEAL");
         SpawnTable table = SpawnTable.fromFile(ownedPath);
         spawnMob = table.mob();
         spawnHp = table.hp();
@@ -290,8 +325,7 @@ public final class MatouBridgeMod {
                 + ".." + spawnYMax + ">" + spawnNote);
     }
 
-    /** Comma join for the override log suffix (Java 8, no extra dep). */
-    private static String join(List<String> parts) {
+    /** Comma join for the override log suffix (Java 8, no extra dep). */    private static String join(List<String> parts) {
         StringBuilder out = new StringBuilder();
         for (String p : parts) {
             if (out.length() > 0) {
@@ -482,8 +516,8 @@ public final class MatouBridgeMod {
         reconcile(world, now);
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>(
                 wires.get(0).states(now));
-        states.putAll(SpawnSeal.seal(census, spawnMob, spawnCap,
-                spawnBudget, spawnYMin, spawnYMax));
+        states.putAll(SpawnSeal.seal(spawnVocab, census, spawnMob,
+                spawnCap, spawnBudget, spawnYMin, spawnYMax));
         Snapshot snap = ForgeSnapshot.snapshot(now, states);
         List<String> due = spawn.decide(snap);
         int slots = census.slotsDue((int) spawnCap, (int) spawnBudget);
@@ -601,7 +635,8 @@ public final class MatouBridgeMod {
         }
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>(
                 wires.get(0).states(now));
-        states.putAll(LootSeal.seal(drops, lootTable, lootCount));
+        states.putAll(LootSeal.seal(lootVocab, drops, lootTable,
+                lootCount));
         Snapshot snap = ForgeSnapshot.snapshot(now, states);
         List<String> due = loot.decide(snap);
         for (String cell : due) {

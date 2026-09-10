@@ -70,4 +70,14 @@ public final class PackWire {
     public Map<MatouId, Object> states(long tick) {
         return pack.states(tick);
     }
+
+    /**
+     * The reflectively loaded pack (the T3 vocabulary provision reads the
+     * seal vocabularies from it — hub
+     * decisions/SPI_STATE_VOCABULARY.md). A read-through, never a copy
+     * owner.
+     */
+    public ContentPack pack() {
+        return pack;
+    }
 }

@@ -3,11 +3,16 @@ package fr.iamacat.bridge.loot;
 import fr.iamacat.bridge.ForgeSnapshot;
 import fr.iamacat.bridge.Packs;
 import fr.iamacat.bridge.wire.OperatorPolicy;
+import fr.iamacat.example1.ExamplePack;
 import fr.iamacat.example1.LootJob;
 import fr.iamacat.example1.LootTable;
+import fr.iamacat.spi.LootStates;
 import fr.iamacat.spi.MatouId;
 import fr.iamacat.spi.Snapshot;
+import fr.iamacat.spi.SpawnStates;
+import fr.iamacat.spi.StateVocabulary;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -65,9 +70,16 @@ public final class LootCheck {
                 "../example1/content/owned.matou").count();
     }
 
+    private static StateVocabulary vocab() {
+        // T3 provision path: the vocabulary the forge wire serves from
+        // the reflectively loaded pack — the gate drives the shipped
+        // seal through it, never through job imports.
+        return new ExamplePack().vocabulary(LootStates.SCOPE);
+    }
+
     private static Snapshot seal(DropStore store, long tick) {
         Map<MatouId, Object> states =
-                LootSeal.seal(store, table(), tableCount());
+                LootSeal.seal(vocab(), store, table(), tableCount());
         return ForgeSnapshot.snapshot(tick, states);
     }
 
@@ -180,43 +192,58 @@ public final class LootCheck {
         // Seal: contents, copy isolation, refusals (the helper above
         // routes through the shipped LootSeal, so every assertion below
         // exercises the live path).
-        Map<MatouId, Object> st = LootSeal.seal(seeded(), wires,
-                tableCount());
+        Map<MatouId, Object> st = LootSeal.seal(vocab(), seeded(),
+                wires, tableCount());
         check(st.get(LootJob.HARVESTED) instanceof Map,
                 "seal carries example1.loot:harvested");
         check(wires.equals(st.get(LootJob.TABLE)),
                 "seal carries example1.loot:table");
         check(Long.valueOf(tableCount()).equals(st.get(LootJob.COUNT)),
                 "seal carries example1.loot:count");
+        check(new ArrayList<MatouId>(st.keySet()).equals(Arrays.asList(
+                LootJob.HARVESTED, LootJob.TABLE, LootJob.COUNT)),
+                "seal keys follow the vocabulary order");
         DropStore iso = new DropStore();
         iso.record("1,2,3:" + LootJob.ORE, 5L);
-        Map<MatouId, Object> snap0 = LootSeal.seal(iso, wires,
+        Map<MatouId, Object> snap0 = LootSeal.seal(vocab(), iso, wires,
                 tableCount());
         iso.record("9,9,9:" + LootJob.BEAST, 6L);
         check(((Map<?, ?>) snap0.get(LootJob.HARVESTED)).size() == 1,
                 "sealed harvests are a copy, later records never leak");
         Map<String, String> mut = new LinkedHashMap<String, String>(wires);
-        Map<MatouId, Object> snapT = LootSeal.seal(seeded(), mut,
-                tableCount());
+        Map<MatouId, Object> snapT = LootSeal.seal(vocab(), seeded(),
+                mut, tableCount());
         mut.put(LootJob.ORE, "example1.content:nope");
         check(wires.equals(snapT.get(LootJob.TABLE)),
                 "sealed table is a copy, later edits never leak");
         final DropStore nullStore = null;
         expectNPE(new Runnable() {
             @Override public void run() {
-                LootSeal.seal(nullStore, table(), 1L);
+                LootSeal.seal(null, nullStore, table(), 1L);
+            }
+        }, "null vocabulary");
+        expectNPE(new Runnable() {
+            @Override public void run() {
+                LootSeal.seal(vocab(), nullStore, table(), 1L);
             }
         }, "null store");
         expectNPE(new Runnable() {
             @Override public void run() {
-                LootSeal.seal(seeded(), null, 1L);
+                LootSeal.seal(vocab(), seeded(), null, 1L);
             }
         }, "null table");
         expectIAE(new Runnable() {
             @Override public void run() {
-                LootSeal.seal(seeded(), table(), 0L);
+                LootSeal.seal(vocab(), seeded(), table(), 0L);
             }
         }, "zero count");
+        final StateVocabulary foreign =
+                new ExamplePack().vocabulary(SpawnStates.SCOPE);
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                LootSeal.seal(foreign, seeded(), table(), 1L);
+            }
+        }, "spawn vocabulary into loot seal");
 
         // Comparateur: store claim expanded by the table equals the job
         // decision tick by tick over the same sealed states (same order,
@@ -225,7 +252,7 @@ public final class LootCheck {
             for (long tick = 95L; tick <= 115L; tick += 5L) {
                 List<String> viaStore = seeded().claimDue(tick);
                 Map<MatouId, Object> states =
-                        LootSeal.seal(seeded(), wires, count);
+                        LootSeal.seal(vocab(), seeded(), wires, count);
                 List<String> viaJob = job.decide(
                         ForgeSnapshot.snapshot(tick, states));
                 check(viaJob.equals(expand(viaStore, wires, count)),
@@ -252,7 +279,7 @@ public final class LootCheck {
         long overCount = OperatorPolicy.effectiveLootCount(contentCount,
                 specs(spec("example1:my_ore", "loot.count", "2")));
         Map<MatouId, Object> overStates =
-                LootSeal.seal(cs, wires, overCount);
+                LootSeal.seal(vocab(), cs, wires, overCount);
         check(job.decide(ForgeSnapshot.snapshot(110L, overStates)).equals(
                 expand(seeded().claimDue(110L), wires, 2L)),
                 "overridden count seals and decides the x2 expansion");

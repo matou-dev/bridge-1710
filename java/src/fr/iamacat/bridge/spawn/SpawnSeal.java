@@ -1,7 +1,8 @@
 package fr.iamacat.bridge.spawn;
 
-import fr.iamacat.example1.SpawnJob;
 import fr.iamacat.spi.MatouId;
+import fr.iamacat.spi.SpawnStates;
+import fr.iamacat.spi.StateVocabulary;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -12,28 +13,37 @@ import java.util.Map;
  *
  * <p>The forge side calls {@link #seal} beside {@code pack.states(tick)},
  * wraps the merge with {@code ForgeSnapshot.snapshot(tick, ...)} — the
- * snapshot choke point stays the single factory, SPI untouched — and runs
- * the pure {@code SpawnJob} over it. Neither the store nor the range is
- * ever shared: only sealed copies cross the seam, so a later record can
- * never rewrite a decision already taken. Java 8, zero deps beyond
- * matou-spi plus example1 (vocabulary ids only, Q2 holds).
+ * snapshot choke point stays the single factory — and runs the pure
+ * {@code SpawnJob} over it. Neither the store nor the range is ever
+ * shared: only sealed copies cross the seam, so a later record can never
+ * rewrite a decision already taken. State ids resolve through the
+ * pack-served {@link StateVocabulary} (T3 registry, hub
+ * {@code decisions/SPI_STATE_VOCABULARY.md}): the seal shares the job's
+ * ids with no bridge-to-content compile edge. Java 8, zero deps beyond
+ * matou-spi.
  */
 public final class SpawnSeal {
     private SpawnSeal() {}
 
     /**
-     * Seal view for one tick: {@code example1.spawn:census} (entity id to
-     * spawn cell) plus {@code example1.spawn:table} (content mob ref) plus
-     * {@code example1.spawn:cap} plus {@code example1.spawn:budget} plus
-     * {@code example1.spawn:y} ({@code [yMin, yMax]} longs). Insertion
-     * order throughout, so live and verdict replay agree.
+     * Seal view for one tick: census (entity id to spawn cell) plus table
+     * (content mob ref) plus cap plus budget plus y ({@code [yMin, yMax]}
+     * longs) — roles resolved through {@code vocab} in seal order, so
+     * live and verdict replay agree. The forge side serves the pack's
+     * vocabulary at wire time (parse-once, never on the tick path).
      *
-     * @throws NullPointerException when store or mob is null.
+     * @throws NullPointerException when vocab, store or mob is null.
      * @throws IllegalArgumentException when mob is bare, cap or budget
-     *         is not positive, or the range is unordered.
+     *         is not positive, the range is unordered, or the vocabulary
+     *         carries no spawn roles.
      */
-    public static Map<MatouId, Object> seal(SpawnStore store, String mob,
+    public static Map<MatouId, Object> seal(StateVocabulary vocab,
+            SpawnStore store, String mob,
             long cap, long budget, long yMin, long yMax) {
+        if (vocab == null) {
+            throw new NullPointerException(
+                    "E_SPAWN_SEAL:null vocabulary");
+        }
         if (store == null) {
             throw new NullPointerException("E_SPAWN_SEAL:null store");
         }
@@ -60,12 +70,12 @@ public final class SpawnSeal {
                             + "]> (want 0 <= yMin <= yMax)");
         }
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>();
-        states.put(SpawnJob.CENSUS, store.sealed());
-        states.put(SpawnJob.TABLE, mob);
-        states.put(SpawnJob.CAP, Long.valueOf(cap));
-        states.put(SpawnJob.BUDGET, Long.valueOf(budget));
-        states.put(SpawnJob.Y, Arrays.asList(Long.valueOf(yMin),
-                Long.valueOf(yMax)));
+        states.put(SpawnStates.census(vocab), store.sealed());
+        states.put(SpawnStates.table(vocab), mob);
+        states.put(SpawnStates.cap(vocab), Long.valueOf(cap));
+        states.put(SpawnStates.budget(vocab), Long.valueOf(budget));
+        states.put(SpawnStates.y(vocab), Arrays.asList(
+                Long.valueOf(yMin), Long.valueOf(yMax)));
         return states;
     }
 }
