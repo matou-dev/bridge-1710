@@ -1,18 +1,27 @@
 package fr.iamacat.bridge.forge;
 
+import cpw.mods.fml.client.registry.RenderingRegistry;
+import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
+import cpw.mods.fml.common.registry.EntityRegistry;
 import cpw.mods.fml.common.registry.GameRegistry;
+import cpw.mods.fml.relauncher.Side;
+import cpw.mods.fml.relauncher.SideOnly;
 import fr.iamacat.bridge.Packs;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.block.Block;
+import net.minecraft.client.model.ModelPig;
+import net.minecraft.client.renderer.entity.RenderPig;
 
 /**
  * Registration half of example1 (see hub decisions/REGISTRATION.md):
@@ -22,7 +31,10 @@ import net.minecraft.block.Block;
  * registering {@code example1:my_ore} from {@code matoubridge} lands
  * {@code matoubridge:example1:my_ore} with an "Illegal extra prefix"
  * warning), so the container owning the {@code example1:} prefix must
- * be the one registering. FML runs every mod's preInit before any
+ * be the one registering. The same preInit registers the one generic
+ * beast (hub decisions/SPAWN.md, custom entity tranche) from the
+ * single-mob spawn table — pig shape and renderer reused, vanilla pigs
+ * never carry our census anymore. FML runs every mod's preInit before any
  * init, so names registered here always precede {@link MatouBridgeMod}
  * init-time binds, whatever the mod order. New refusals stay
  * registration-local ({@code E_REG_*}, never in the {@code E_FORGE_*}
@@ -34,9 +46,23 @@ import net.minecraft.block.Block;
 public final class Example1Mod {
     public static final String MODID = "example1";
     static final String PACKS_PATH = "config/matoubridge/packs.cfg";
+    /**
+     * Entity tranche: mod-local beast id (one generic beast, never one
+     * per content — a second id would be a second entity).
+     */
+    static final int ENTITY_BEAST_ID = 0;
+    /**
+     * Entity tranche: pig-like tracking (range, update ticks, velocity).
+     * Constants, never defaults: the proof watches beasts move and fall
+     * like the pigs they replace.
+     */
+    static final int ENTITY_TRACKING_RANGE = 64;
+    static final int ENTITY_UPDATE_TICKS = 1;
+    static final boolean ENTITY_SENDS_VELOCITY = true;
 
     private final Map<String, Block> registered =
             new HashMap<String, Block>();
+    private String registeredEntity;
 
     /**
      * Registration: every packs.cfg wire naming a non-vanilla block
@@ -58,9 +84,11 @@ public final class Example1Mod {
             throw new RuntimeException("E_REG_PACKS:unreadable <"
                     + PACKS_PATH + "> (" + e.getMessage() + ")", e);
         }
-        for (Packs.PackSpec spec : Packs.parseLines(lines)) {
+        List<Packs.PackSpec> specs = Packs.parseLines(lines);
+        for (Packs.PackSpec spec : specs) {
             registerCustom(spec);
         }
+        registerBeast(specs);
     }
 
     /**
@@ -79,6 +107,19 @@ public final class Example1Mod {
             }
             System.out.println("[MatouBridge] registered <" + e.getKey()
                     + "> id " + Block.getIdFromBlock(e.getValue()));
+        }
+        if (registeredEntity != null) {
+            if (EntityRegistry.instance().lookupModSpawn(
+                    MatouEntity.class, true) == null) {
+                throw new IllegalStateException(
+                        "E_REG_BEAST:unregistered <"
+                                + registeredEntity + ">");
+            }
+            System.out.println("[MatouBridge] registered-entity <"
+                    + registeredEntity + ">");
+            if (FMLCommonHandler.instance().getSide() == Side.CLIENT) {
+                registerBeastRenderer();
+            }
         }
     }
 
@@ -140,6 +181,109 @@ public final class Example1Mod {
                     + want + "> (" + e.getMessage() + ")", e);
         }
         registered.put(want, ore);
+    }
+
+    /**
+     * Entity registration: the single mob ref from the same owned content
+     * the loot table and the spawn wire came from (parsed once, like
+     * blocks — never on the tick path). No owned file anywhere means no
+     * beast (Q1 cohabitation), same passivity as the spawn wire. Several
+     * distinct owned files refuse loudly — silent table picks are
+     * defaults, and per-mob tables are a documented re-opener. The short
+     * mob name registers (no container prefixing on the entity path to
+     * warn about — the name rides verbatim).
+     */
+    private void registerBeast(List<Packs.PackSpec> specs) {
+        Set<String> owned = new HashSet<String>();
+        for (Packs.PackSpec spec : specs) {
+            String path = spec.args.get("ownedFile");
+            if (path != null) {
+                owned.add(path);
+            }
+        }
+        if (owned.isEmpty()) {
+            return;
+        }
+        if (owned.size() > 1) {
+            throw new IllegalArgumentException("E_REG_TABLE:multi <"
+                    + owned + "> (one beast table per bridge)");
+        }
+        String ownedFile = owned.iterator().next();
+        String mob = loadMobRef(ownedFile);
+        int colon = mob.indexOf(':');
+        String shortName = mob.substring(colon + 1);
+        registeredEntity = mob;
+        try {
+            EntityRegistry.registerModEntity(MatouEntity.class, shortName,
+                    ENTITY_BEAST_ID, this, ENTITY_TRACKING_RANGE,
+                    ENTITY_UPDATE_TICKS, ENTITY_SENDS_VELOCITY);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("E_REG_BEAST:refused <"
+                    + mob + "> (" + e.getMessage() + ")", e);
+        }
+    }
+
+    /**
+     * Client-only renderer mapping: the generic beast reuses the vanilla
+     * pig renderer until the custom-renderer tranche (main model plus the
+     * saddle pass plus shadow, same values as the vanilla bootstrap).
+     * Stripped on the server ({@code @SideOnly}), so dedicated servers
+     * never resolve the client classes — a missing mapping would die
+     * loudly on the client instead (null renderer at first tracked
+     * spawn).
+     */
+    @SideOnly(Side.CLIENT)
+    private static void registerBeastRenderer() {
+        RenderingRegistry.registerEntityRenderingHandler(
+                MatouEntity.class,
+                new RenderPig(new ModelPig(), new ModelPig(0.5F), 0.7F));
+    }
+
+    /**
+     * Content mob ref, reached reflectively: the bridge stays content-blind
+     * at build time (Q2 — same rule as {@code loadSpecs}). The
+     * single-mob rule lives in {@code SpawnTable.fromFile} — zero or
+     * several mobs already refuse there, never a quiet pick here. Every
+     * failure is coded E_REG_*, never a silent default.
+     */
+    private static String loadMobRef(String ownedFile) {
+        final Class<?> cls;
+        try {
+            cls = Class.forName("fr.iamacat.example1.SpawnTable");
+        } catch (ClassNotFoundException e) {
+            throw new IllegalArgumentException("E_REG_BEAST:missing "
+                    + "example1 for <" + ownedFile + "> ("
+                    + e.getMessage() + ")", e);
+        }
+        final Method fromFile;
+        try {
+            fromFile = cls.getMethod("fromFile", String.class);
+        } catch (NoSuchMethodException e) {
+            throw new IllegalArgumentException("E_REG_BEAST:shape "
+                    + "<fr.iamacat.example1.SpawnTable> ("
+                    + e.getMessage() + ")", e);
+        }
+        try {
+            Object table = fromFile.invoke(null, ownedFile);
+            Object mob = table.getClass().getMethod("mob").invoke(table);
+            if (!(mob instanceof String) || ((String) mob).isEmpty()
+                    || ((String) mob).indexOf(':') < 0) {
+                throw new IllegalStateException("E_REG_BEAST:shape "
+                        + "<fromFile> (want qualified mob ref)");
+            }
+            return (String) mob;
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new IllegalArgumentException("E_REG_BEAST:unreadable <"
+                    + ownedFile + "> (" + cause.getMessage() + ")", e);
+        } catch (IllegalAccessException e) {
+            throw new IllegalArgumentException("E_REG_BEAST:shape <"
+                    + ownedFile + "> (" + e.getMessage() + ")", e);
+        } catch (NoSuchMethodException e) {
+            throw new IllegalArgumentException("E_REG_BEAST:shape "
+                    + "<fr.iamacat.example1.SpawnTable> ("
+                    + e.getMessage() + ")", e);
+        }
     }
 
     /**

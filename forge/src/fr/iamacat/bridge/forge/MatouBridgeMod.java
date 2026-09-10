@@ -35,7 +35,6 @@ import java.util.Set;
 import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityItem;
-import net.minecraft.entity.passive.EntityPig;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
 import net.minecraft.world.World;
@@ -71,8 +70,8 @@ import net.minecraftforge.event.world.BlockEvent;
  * what drops. Due drops land as {@link EntityItem} carriers beside the
  * vanilla drops (vanilla behaviour untouched). The carrier is vanilla
  * diamond until item registration lands on the REGISTRATION path; every
- * dim-0 kill pays the single table entry until the custom entity lands
- * on the SPAWN path. New refusals stay loot-local ({@code E_LOOT_*},
+ * dim-0 kill pays the single table entry (per-mob filtering is a
+ * re-opener, never a quiet filter — hub decisions/LOOT.md). New refusals stay loot-local ({@code E_LOOT_*},
  * never in the {@code E_FORGE_*} parity catalog), so bridge parity holds
  * with behaviour intentionally 1710-only until proven.
  *
@@ -80,19 +79,20 @@ import net.minecraftforge.event.world.BlockEvent;
  * {@link SpawnJob} reads the bridge-owned {@link SpawnStore} census plus
  * the wired {@link SpawnTable} beside the first wire's pack states
  * ({@link SpawnSeal}, SPI untouched) and decides budgeted spawns; due
- * spawns land as vanilla pigs carrying our loot table (zero registration
- * risk — a custom entity follows the REGISTRATION path later). A live
- * {@code slots != due} divergence fails the tick loudly
- * ({@code E_SPAWN_SEAL:diverged}, spike-tripwire shape). Census releases
- * ride the kill hook below; an {@code EntityJoinWorldEvent} veto holds
- * the cap against joins the budget never decided (vanilla or foreign).
- * Landing plus veto stay passive unless {@code SPAWN=1} (same opt-in as
- * the spike/loot companion proofs): always-on landing would veto the
- * loot proof's own pig once the census fills, so the union and loot runs
- * stay byte-for-byte spawn-free. New refusals stay spawn-local
- * ({@code E_SPAWN_*}, never in the {@code E_FORGE_*} parity catalog), so
- * bridge parity holds with behaviour intentionally 1710-only until
- * proven.
+ * spawns land as the registered custom beast ({@link MatouEntity}, pig
+ * shape and renderer reused — registration-path tranche, hub
+ * decisions/REGISTRATION.md). A live {@code slots != due} divergence
+ * fails the tick loudly ({@code E_SPAWN_SEAL:diverged},
+ * spike-tripwire shape). Census releases ride the kill hook below; an
+ * {@code EntityJoinWorldEvent} veto holds the cap against beast joins
+ * the budget never decided (vanilla pigs are a different species now:
+ * ignored, never vetoed). Landing plus veto stay passive unless
+ * {@code SPAWN=1} (same opt-in as the spike/loot companion proofs):
+ * always-on landing would veto the loot proof's own beast once the
+ * census fills, so the union and loot runs stay byte-for-byte
+ * spawn-free. New refusals stay spawn-local ({@code E_SPAWN_*}, never
+ * in the {@code E_FORGE_*} parity catalog), so bridge parity holds with
+ * behaviour intentionally 1710-only until proven.
  *
  * <p>Registration (hub decisions/REGISTRATION.md) lives next door in
  * {@link Example1Mod}: a second mod under example1's own modid, whose
@@ -125,16 +125,16 @@ public final class MatouBridgeMod {
      * never a default: the proof counts carriers per harvest. */
     static final long LOOT_COUNT = 1L;
     /** Spawn switch (DEV proof opt-in): landing plus veto stay passive
-     * unless {@code SPAWN=1}, so union and loot runs never see a pig. */
+     * unless {@code SPAWN=1}, so union and loot runs never see a beast. */
     static final boolean SPAWN = "1".equals(System.getenv("SPAWN"));
     /** Spawn policy: living cap — a full census lands nothing, the join
-     * veto holds it. A constant, never a default: the proof counts pigs
+     * veto holds it. A constant, never a default: the proof counts beasts
      * (the companion mirrors it, see its SPAWN_CAP note). */
     static final long SPAWN_CAP = 4L;
     /** Spawn policy: landings per tick while room remains. A constant,
      * never a default: the proof watches the census fill one per tick. */
     static final long SPAWN_BUDGET = 1L;
-    /** Spawn band: pads land just above the union slices (63..65), so pigs
+    /** Spawn band: pads land just above the union slices (63..65), so beasts
      * drop onto roof or plane and never inside a block. Entities never
      * pollute the block verdict either way. Constants, never defaults:
      * the pure job reads them as snapshot states. */
@@ -305,9 +305,8 @@ public final class MatouBridgeMod {
     /**
      * Loot record: a server-side dim-0 mob kill becomes a beast harvest
      * at the entity's block coords. Single-table scope (hub
-     * decisions/LOOT.md): every kill pays the one entry until the custom
-     * entity lands — per-mob filtering is a re-opener, never a quiet
-     * filter here.
+     * decisions/LOOT.md): every kill pays the one entry — per-mob
+     * filtering is a re-opener, never a quiet filter here.
      *
      * <p>Owner discipline (measured live: NoSuchFieldError worldObj):
      * reobf only walks in-jar superclass chains, and stub supertypes
@@ -318,12 +317,12 @@ public final class MatouBridgeMod {
     @SubscribeEvent
     public void onKill(LivingDropsEvent event) {
         Entity body = event.entityLiving;
-        if (spawnMob != null && body instanceof EntityPig) {
+        if (spawnMob != null && body instanceof MatouEntity) {
             // Owner discipline (measured live on loot: reobf only walks
             // in-jar superclass chains, stub supertypes never ship) —
             // the id is read through the declaring stub type (Entity).
-            // Unknown ids are not ours (vanilla beasts, the loot proof's
-            // own pig): false, never a refusal.
+            // Unknown ids are not ours (a vanilla beast dies without ever
+            // being recorded): false, never a refusal.
             census.release(Integer.toString(body.getEntityId()));
         }
         if (lootTable == null) {
@@ -345,15 +344,16 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Spawn census: every server-side dim-0 host join is recorded under
+     * Spawn census: every server-side dim-0 beast join is recorded under
      * its entity id — own landings (which also fire this event, recorded
-     * again here idempotently) and vanilla joins alike. Recording every
-     * join the veto lets through is what keeps the census equal to the
-     * living reality: a join past the cap is refused instead (the budget
-     * never decided it), anything else joins the census the pure budget
-     * counts. Passive without a wired mob, and passive unless
-     * {@code SPAWN=1} (the union and loot runs never see a pig, recorded
-     * or otherwise).
+     * again here idempotently) and foreign beast joins alike. Recording
+     * every join the veto lets through is what keeps the census equal to
+     * the living reality: a join past the cap is refused instead (the
+     * budget never decided it), anything else joins the census the pure
+     * budget counts. Vanilla pigs are a different species (ignored here,
+     * never vetoed). Passive without a wired mob, and passive unless
+     * {@code SPAWN=1} (the union and loot runs never see a beast,
+     * recorded or otherwise).
      */
     @SubscribeEvent
     public void onJoin(EntityJoinWorldEvent event) {
@@ -366,18 +366,18 @@ public final class MatouBridgeMod {
         if (event.world.provider.dimensionId != 0) {
             return;
         }
-        if (!(event.entity instanceof EntityPig)) {
+        if (!(event.entity instanceof MatouEntity)) {
             return;
         }
         // Owner discipline (measured live on loot: reobf only walks
         // in-jar superclass chains, stub supertypes never ship) — the id
         // goes through the declaring stub type (Entity), and the joined
         // entity resolves through its declaring base (EntityEvent), never
-        // through the pig or the join subclass.
+        // through the beast or the join subclass.
         Entity body = event.entity;
         if (census.size() >= SPAWN_CAP) {
             event.setCanceled(true);
-            System.out.println("[MatouBridge] spawn vetoed <pig> at tick "
+            System.out.println("[MatouBridge] spawn vetoed <beast> at tick "
                     + tick + " (census at cap " + SPAWN_CAP + ")");
             return;
         }
@@ -392,7 +392,7 @@ public final class MatouBridgeMod {
 
     /**
      * Spawn seal: census plus table, cap, budget and band beside the
-     * first wire's pack states, pure decide, land one pig per due slot,
+     * first wire's pack states, pure decide, land one beast per due slot,
      * record every landing. The census is reconciled first (see
      * {@link #reconcile}): the join event misses silent paths (measured
      * live: a natural grass spawn bypassed it and breached the cap), so
@@ -430,26 +430,27 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Spawn reconcile: adopt every living dim-0 host pig the census does
+     * Spawn reconcile: adopt every living dim-0 beast the census does
      * not know, sweep every census id no longer living. The join event
      * stays (prompt record plus the past-cap veto), but it misses silent
      * paths — measured live on Forge 1614: a natural grass spawn never
      * fired it, a landing-only census undercounted reality and the fifth
-     * living pig breached the cap loudly in the proof. The poll is the
+     * living beast breached the cap loudly in the proof. The poll is the
      * census of record; events are the fast path. Adopted cells carry the
-     * spawn mob ref at the current pos (tranche 1: every dim-0 pig carries
-     * our loot through the single-table kill hook, so the pure foreign
-     * rule holds). Tranche-1 scope: pigs outside the loaded set sweep —
-     * the proof world keeps them loaded; a rejoin re-adopts next tick.
+     * spawn mob ref at the current pos (tranche 1: every dim-0 beast
+     * carries our loot through the single-table kill hook, so the pure
+     * foreign rule holds). Tranche-1 scope: beasts outside the loaded set
+     * sweep — the proof world keeps them loaded; a rejoin re-adopts next
+     * tick.
      *
      * <p>Owner discipline (measured live on loot): inherited vanilla
      * members go through the declaring stub type ({@code Entity}), never
-     * through the pig.
+     * through the beast.
      */
     private void reconcile(World world, long now) {
         Map<String, String> living = new LinkedHashMap<String, String>();
         for (Object o : world.loadedEntityList) {
-            if (!(o instanceof EntityPig)) {
+            if (!(o instanceof MatouEntity)) {
                 continue;
             }
             Entity body = (Entity) o;
@@ -479,21 +480,22 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Spawn landing: one vanilla pig per due slot at the decided pad,
-     * recorded into the census under its entity id. A refused spawn fails
-     * loudly — an unrecorded pig is census drift silently otherwise.
+     * Spawn landing: one registered beast per due slot at the decided
+     * pad, recorded into the census under its entity id. A refused spawn
+     * fails loudly — an unrecorded beast is census drift silently
+     * otherwise.
      *
      * <p>Owner discipline (measured live on loot: NoSuchFieldError posX):
      * reobf only walks in-jar superclass chains, and stub supertypes
      * never ship — so inherited vanilla members go through the declaring
-     * stub type ({@code Entity}), never through the pig.
+     * stub type ({@code Entity}), never through the beast.
      */
     private void landBeast(World world, int x, int y, int z, String cell,
             long now) {
-        EntityPig pig = new EntityPig(world);
-        Entity body = pig;
+        MatouEntity beast = new MatouEntity(world);
+        Entity body = beast;
         body.setPositionAndRotation(x + 0.5, y, z + 0.5, 0.0f, 0.0f);
-        if (!world.spawnEntityInWorld(pig)) {
+        if (!world.spawnEntityInWorld(beast)) {
             throw new IllegalStateException("E_SPAWN_SPAWN:refused <" + x
                     + "," + y + "," + z + ">");
         }

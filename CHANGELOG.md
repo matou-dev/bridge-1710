@@ -7,6 +7,16 @@ Full notes per tag: https://github.com/matou-dev/bridge-1710/releases.
 
 ## [Unreleased]
 
+- Custom entity tranche (hub `decisions/SPAWN.md`): `MatouEntity`
+  (generic beast, pig shape/AI/sounds reused, vanilla health) +
+  `Example1Mod` preInit `EntityRegistry.registerModEntity` (short mob
+  name, mod-local id 0, pig-like tracking) with init-time
+  `lookupModSpawn` tripwire + client-only vanilla `RenderPig` mapping;
+  census/veto/reconcile/kill/landing match the beast (vanilla pigs
+  ignored); companion counts/kills `MatouEntity` and carries
+  `required-after:matoubridge` (ModClassLoader negative-cache CNFE,
+  measured live); `E_REG_*` local, no new `E_FORGE_*`.
+
 ## [1.2.0] - 2026-09-09
 
 Versioned server drop: https://github.com/matou-dev/bridge-1710/releases/tag/v1.2.0

@@ -19,6 +19,8 @@ public @interface Mod {
 
     String acceptableRemoteVersions() default "";
 
+    String dependencies() default "";
+
     @Retention(RetentionPolicy.RUNTIME)
     @interface EventHandler {
     }
