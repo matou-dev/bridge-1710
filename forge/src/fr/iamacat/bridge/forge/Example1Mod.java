@@ -129,8 +129,12 @@ public final class Example1Mod {
                     + ">");
         }
         Block ore = new MatouBlock(shortName, hardness, opaque);
+        // Short name on purpose: GameRegistry.registerBlock warns on any
+        // qualified name ("Illegal extra prefix") even when the prefix is
+        // already ours, then addPrefix keeps it verbatim — short in,
+        // example1:my_ore out, zero warnings. Measured live.
         try {
-            GameRegistry.registerBlock(ore, want);
+            GameRegistry.registerBlock(ore, shortName);
         } catch (Exception e) {
             throw new IllegalArgumentException("E_REG_BLOCK:refused <"
                     + want + "> (" + e.getMessage() + ")", e);
