@@ -6,6 +6,10 @@ package net.minecraft.block;
  * 1.7.10 SRG by tools/run-live.sh before compiling — drift fails loudly.
  */
 public class Block {
+    /** Vanilla opacity slot (SRG field_149787_q): MatouBlock writes it,
+     * stock isOpaqueCube reads it — no shadow field, ever. */
+    protected boolean opaque;
+
     public Block(net.minecraft.block.material.Material material) {
     }
 

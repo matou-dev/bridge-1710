@@ -85,6 +85,7 @@ pin_method "net/minecraft/block/Block/setHardness" "(F)Lnet/minecraft/block/Bloc
 pin_method "net/minecraft/block/Block/isOpaqueCube" "()Z"
 pin_method "net/minecraft/block/Block/getIdFromBlock" "(Lnet/minecraft/block/Block;)I"
 pin_field "net/minecraft/block/material/Material/rock"
+pin_field "net/minecraft/block/Block/opaque"
 pin_method "net/minecraft/world/World/setBlock" "(IIILnet/minecraft/block/Block;)Z"
 pin_field "net/minecraft/world/World/provider"
 pin_field "net/minecraft/world/WorldProvider/dimensionId"

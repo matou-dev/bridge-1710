@@ -5,14 +5,16 @@ import net.minecraft.block.material.Material;
 
 /**
  * Registration landing (see hub decisions/REGISTRATION.md): the one
- * generic Forge block every content block registers as. Physics rides
- * the content {@code BlockSpec} (hardness, opacity) — never hardcoded
- * per content, never a subclass per content. Only this package may
- * import {@code net.minecraft} / {@code cpw.mods}.
+ * generic Forge block every content block registers as. Physics lands
+ * in the vanilla slots (hardness via the setter, opacity in the
+ * vanilla {@code opaque} slot the stock {@code isOpaqueCube} reads) —
+ * never hardcoded per content, never a subclass per content, never a
+ * shadow field (a same-named project field would hide the vanilla one
+ * and split readers — measured in reobf output, refused by shape).
+ * Only this package may import {@code net.minecraft} /
+ * {@code cpw.mods}.
  */
 public final class MatouBlock extends Block {
-    private final boolean opaque;
-
     /**
      * Args are pre-validated by the registering mod (E_REG_* owns the
      * refusals); the constructor only lands them.
@@ -21,11 +23,11 @@ public final class MatouBlock extends Block {
         super(Material.rock);
         setBlockName(shortName);
         setHardness(hardness);
-        this.opaque = opaque;
+        super.opaque = opaque;
     }
 
     @Override
     public boolean isOpaqueCube() {
-        return opaque;
+        return super.opaque;
     }
 }

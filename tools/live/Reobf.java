@@ -30,45 +30,74 @@ public final class Reobf {
         System.err.println("map: " + methods.size() + " methods, " + fields.size() + " fields");
         final Map<String, String> m = methods;
         final Map<String, String> f = fields;
-        Remapper remapper = new Remapper() {
-            public String mapMethodName(String owner, String name, String desc) {
-                if (owner.startsWith("net/minecraft/")) {
-                    String hit = m.get(owner + "." + name + desc);
-                    if (hit != null) {
-                        return hit;
-                    }
-                }
-                return name;
-            }
-            public String mapFieldName(String owner, String name, String desc) {
-                if (owner.startsWith("net/minecraft/")) {
-                    String hit = f.get(owner + "." + name);
-                    if (hit != null) {
-                        return hit;
-                    }
-                }
-                return name;
-            }
-        };
+        // In-jar superclass chain (internal names): forge/ subclasses
+        // vanilla (MatouBlock extends Block) and inherited member refs
+        // compile with the project class as owner. An owner-blind map
+        // leaves the MCP name in place and dies linking live (measured:
+        // NoSuchMethodError MatouBlock.setBlockName at preInit). Owners
+        // outside net/minecraft/ walk this chain; the first SRG hit wins.
+        // Overriding declarations flow through the same hooks
+        // (ClassRemapper visits them), so isOpaqueCube links too.
+        // Interface defaults are NOT walked (no forge/ interface impls).
         JarFile in = new JarFile(a[1]);
-        JarOutputStream out = new JarOutputStream(new FileOutputStream(a[2]));
-        Enumeration<JarEntry> en = in.entries();
-        int remappedRefs = 0;
-        while (en.hasMoreElements()) {
-            JarEntry e = en.nextElement();
+        Map<String, byte[]> classes = new LinkedHashMap<String, byte[]>();
+        List<String> order = new ArrayList<String>();
+        Enumeration<JarEntry> scan = in.entries();
+        while (scan.hasMoreElements()) {
+            JarEntry e = scan.nextElement();
             InputStream is = in.getInputStream(e);
             byte[] data = readAll(is);
             is.close();
-            JarEntry ne = new JarEntry(e.getName());
-            ne.setTime(e.getTime());
-            out.putNextEntry(ne);
+            order.add(e.getName());
             if (e.getName().endsWith(".class")) {
+                classes.put(e.getName(), data);
+            } else {
+                classes.put(e.getName(), null);
+            }
+        }
+        final Map<String, String> supers = new HashMap<String, String>();
+        for (byte[] data : classes.values()) {
+            if (data == null) {
+                continue;
+            }
+            ClassReader cr = new ClassReader(data);
+            supers.put(cr.getClassName(), cr.getSuperName());
+        }
+        Remapper remapper = new Remapper() {
+            private String walk(Map<String, String> map, String owner,
+                    String member) {
+                String o = owner;
+                while (o != null) {
+                    String hit = map.get(o + "." + member);
+                    if (hit != null) {
+                        return hit;
+                    }
+                    o = supers.get(o);
+                }
+                return null;
+            }
+            public String mapMethodName(String owner, String name, String desc) {
+                String hit = walk(m, owner, name + desc);
+                return hit != null ? hit : name;
+            }
+            public String mapFieldName(String owner, String name, String desc) {
+                String hit = walk(f, owner, name);
+                return hit != null ? hit : name;
+            }
+        };
+        JarOutputStream out = new JarOutputStream(new FileOutputStream(a[2]));
+        for (String entryName : order) {
+            byte[] data = classes.get(entryName);
+            out.putNextEntry(new JarEntry(entryName));
+            if (data != null) {
                 ClassReader cr = new ClassReader(data);
                 ClassWriter cw = new ClassWriter(0);
                 cr.accept(new RemappingClassAdapter(cw, remapper), ClassReader.EXPAND_FRAMES);
                 out.write(cw.toByteArray());
             } else {
-                out.write(data);
+                InputStream is = in.getInputStream(in.getEntry(entryName));
+                out.write(readAll(is));
+                is.close();
             }
             out.closeEntry();
         }
