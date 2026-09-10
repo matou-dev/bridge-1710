@@ -44,6 +44,7 @@ M net/minecraft/world/World spawnEntityInWorld func_72838_d (Lnet/minecraft/enti
 M net/minecraft/entity/item/EntityItem getEntityItem func_92059_d ()Lnet/minecraft/item/ItemStack; 0
 M net/minecraft/item/ItemStack getItem func_77973_b ()Lnet/minecraft/item/Item; 0
 F net/minecraft/world/World loadedEntityList field_72996_f
+F net/minecraft/entity/Entity isDead field_70128_L
 F net/minecraft/entity/Entity posX field_70165_t
 F net/minecraft/entity/Entity posY field_70163_u
 F net/minecraft/entity/Entity posZ field_70161_v

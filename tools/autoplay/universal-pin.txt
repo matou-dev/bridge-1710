@@ -22,3 +22,7 @@ net.minecraftforge.event.world.BlockEvent$HarvestDropsEvent HarvestDropsEvent(
 net.minecraftforge.event.entity.living.LivingDropsEvent LivingDropsEvent(
 cpw.mods.fml.common.Mod modid()
 cpw.mods.fml.common.eventhandler.EventBus register(
+net.minecraftforge.event.entity.EntityJoinWorldEvent EntityJoinWorldEvent(
+net.minecraftforge.event.entity.EntityEvent  entity;
+net.minecraftforge.event.entity.EntityJoinWorldEvent  world;
+cpw.mods.fml.common.eventhandler.Event setCanceled(

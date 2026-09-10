@@ -59,6 +59,7 @@ javac --release 8 -cp java/build -d java/build $(find java/test -name '*.java')
 java -cp java/build fr.iamacat.bridge.ForgeContentCheck
 java -cp java/build fr.iamacat.bridge.spike.RepopCheck
 java -cp java/build fr.iamacat.bridge.loot.LootCheck
+java -cp java/build fr.iamacat.bridge.spawn.SpawnCheck
 # Etage 2 : forge/ seul touche MC (Forge 10.13.4.1614). Sans MC_JAR : skip.
 if [ -z "${MC_JAR:-}" ]; then
   echo "skip forge (no MC_JAR)"

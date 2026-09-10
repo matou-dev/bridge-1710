@@ -97,6 +97,10 @@ pin_field "net/minecraft/entity/Entity/posX"
 pin_field "net/minecraft/entity/Entity/posY"
 pin_field "net/minecraft/entity/Entity/posZ"
 pin_method "net/minecraft/world/World/setBlock" "(IIILnet/minecraft/block/Block;)Z"
+pin_method "net/minecraft/entity/Entity/getEntityId" "()I"
+pin_method "net/minecraft/entity/Entity/setPositionAndRotation" "(DDDFF)V"
+pin_field "net/minecraft/world/World/loadedEntityList"
+pin_field "net/minecraft/entity/Entity/isDead"
 pin_field "net/minecraft/world/World/provider"
 pin_field "net/minecraft/world/WorldProvider/dimensionId"
 pin_field "net/minecraft/world/World/isRemote"
@@ -324,9 +328,9 @@ set -e
 echo "ok b3-live : server ran ($BOOT_SECS s)"
 
 # 6. Fail loudly on any runtime refusal or linkage error.
-if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
+if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
   echo "FAIL b3-live : runtime refusal (see $SERV/boot-b3.log)"
-  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|Caused by" "$SERV/boot-b3.log"
+  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|Caused by" "$SERV/boot-b3.log"
   exit 1
 fi
 grep -a -q "matoubridge" "$SERV/boot-b3.log" \
