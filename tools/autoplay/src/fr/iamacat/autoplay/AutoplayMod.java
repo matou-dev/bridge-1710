@@ -8,6 +8,7 @@ import cpw.mods.fml.relauncher.Side;
 import java.util.ArrayList;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.passive.EntityPig;
 import net.minecraft.entity.player.EntityPlayer;
@@ -351,7 +352,11 @@ public class AutoplayMod {
             return;
         }
         EntityPig pig = new EntityPig(world);
-        pig.setPositionAndRotation(LOOT_BEAST_X + 0.5, LOOT_BEAST_Y,
+        // Owner discipline (measured live: reobf only walks in-jar
+        // superclass chains, stub supertypes never ship): inherited calls
+        // go through the declaring stub type, never the pig.
+        Entity body = pig;
+        body.setPositionAndRotation(LOOT_BEAST_X + 0.5, LOOT_BEAST_Y,
                 LOOT_BEAST_Z + 0.5, 0.0f, 0.0f);
         if (!world.spawnEntityInWorld(pig)) {
             lootFail("pig spawn refused at worldTick " + worldTicks);
@@ -359,7 +364,7 @@ public class AutoplayMod {
         }
         MinecraftForge.EVENT_BUS.post(new LivingDropsEvent(pig, null,
                 new ArrayList<EntityItem>(), 0, true, 0));
-        pig.setDead();
+        body.setDead();
         lootBeastTick = worldTicks;
         System.out.println("[MatouAutoplay] loot beast killed <"
                 + LOOT_BEAST_X + "," + LOOT_BEAST_Y + ","
@@ -401,7 +406,7 @@ public class AutoplayMod {
         }
     }
 
-    private static boolean near(EntityItem e, int x, int y, int z) {
+    private static boolean near(Entity e, int x, int y, int z) {
         return Math.abs(e.posX - (x + 0.5)) < 3.0
                 && Math.abs(e.posY - (y + 0.5)) < 3.0
                 && Math.abs(e.posZ - (z + 0.5)) < 3.0;

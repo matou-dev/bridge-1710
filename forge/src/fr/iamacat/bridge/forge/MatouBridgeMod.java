@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.minecraft.block.Block;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
@@ -248,21 +249,28 @@ public final class MatouBridgeMod {
      * decisions/LOOT.md): every kill pays the one entry until the custom
      * entity lands — per-mob filtering is a re-opener, never a quiet
      * filter here.
+     *
+     * <p>Owner discipline (measured live: NoSuchFieldError worldObj):
+     * reobf only walks in-jar superclass chains, and stub supertypes
+     * never ship — so inherited vanilla members are read through the
+     * declaring stub type ({@code Entity}), never through the event's
+     * {@code EntityLivingBase}.
      */
     @SubscribeEvent
     public void onKill(LivingDropsEvent event) {
         if (lootTable == null) {
             return;
         }
-        if (event.entityLiving.worldObj.isRemote) {
+        Entity body = event.entityLiving;
+        if (body.worldObj.isRemote) {
             return;
         }
-        if (event.entityLiving.worldObj.provider.dimensionId != 0) {
+        if (body.worldObj.provider.dimensionId != 0) {
             return;
         }
-        int x = (int) Math.floor(event.entityLiving.posX);
-        int y = (int) Math.floor(event.entityLiving.posY);
-        int z = (int) Math.floor(event.entityLiving.posZ);
+        int x = (int) Math.floor(body.posX);
+        int y = (int) Math.floor(body.posY);
+        int z = (int) Math.floor(body.posZ);
         String harvest = Cell.of(x, y, z, LootJob.BEAST).render();
         drops.record(harvest, tick);
         System.out.println("[MatouBridge] loot recorded <" + harvest
