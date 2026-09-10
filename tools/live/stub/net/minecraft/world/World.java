@@ -1,6 +1,7 @@
 package net.minecraft.world;
 
 import net.minecraft.block.Block;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
 
 /**
@@ -12,11 +13,17 @@ import net.minecraft.entity.player.EntityPlayer;
  * {@code setBlockToAir} and {@code isAirBlock} serve
  * the dev-only autoplay spike proof (pinned by tools/autoplay/want.txt) —
  * drift fails loudly on the owning side.
+ * {@code spawnEntityInWorld} serves the loot sink in forge/
+ * (MatouBridgeMod spawns one carrier per due drop, pinned to the 1.7.10
+ * SRG by tools/run-live.sh); {@code loadedEntityList} serves the
+ * dev-only autoplay loot proof (companion polls carriers, pinned by
+ * tools/autoplay/want.txt).
  */
 public class World {
     public WorldProvider provider;
     public boolean isRemote;
     public java.util.List<EntityPlayer> playerEntities;
+    public java.util.List loadedEntityList;
 
     public boolean setBlock(int x, int y, int z, Block block) {
         return false;
@@ -27,6 +34,10 @@ public class World {
     }
 
     public boolean isAirBlock(int x, int y, int z) {
+        return false;
+    }
+
+    public boolean spawnEntityInWorld(Entity entity) {
         return false;
     }
 }

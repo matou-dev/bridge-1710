@@ -33,3 +33,18 @@ F net/minecraft/world/WorldProvider dimensionId field_76574_g
 # Spike harvest author: the BreakEvent constructor reads the player
 # (ForgeHooks.canHarvestBlock — measured NPE on null, never assumed).
 F net/minecraft/world/World playerEntities field_73010_i
+# Loot proof (LOOT=1): server-side simulated harvests — an ore harvest
+# (place + clear + HarvestDropsEvent post, same honesty standard as the
+# spike) plus a beast kill (spawned pig + LivingDropsEvent post), then
+# diamond-carrier polls. Each line must match exactly one MD/FD line of
+# the sha1-pinned srg-mcp.srg (same searge practice as above).
+M net/minecraft/entity/Entity setPositionAndRotation func_70080_a (DDDFF)V 0
+M net/minecraft/entity/Entity setDead func_70106_y ()V 0
+M net/minecraft/world/World spawnEntityInWorld func_72838_d (Lnet/minecraft/entity/Entity;)Z 0
+M net/minecraft/entity/item/EntityItem getEntityItem func_92059_d ()Lnet/minecraft/item/ItemStack; 0
+M net/minecraft/item/ItemStack getItem func_77973_b ()Lnet/minecraft/item/Item; 0
+F net/minecraft/world/World loadedEntityList field_72996_f
+F net/minecraft/entity/Entity posX field_70165_t
+F net/minecraft/entity/Entity posY field_70163_u
+F net/minecraft/entity/Entity posZ field_70161_v
+F net/minecraft/init/Items diamond field_151045_i

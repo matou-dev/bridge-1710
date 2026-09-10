@@ -38,4 +38,24 @@ public class BlockEvent extends Event {
             super(x, y, z, world, block, blockMetadata);
         }
     }
+
+    public static class HarvestDropsEvent extends BlockEvent {
+        public final int fortuneLevel;
+        public final java.util.ArrayList<net.minecraft.item.ItemStack>
+                drops = null;
+        public final boolean isSilkTouching;
+        public float dropChance;
+        public final EntityPlayer harvester = null;
+
+        public HarvestDropsEvent(int x, int y, int z, World world,
+                Block block, int blockMetadata, int fortuneLevel,
+                float dropChance,
+                java.util.ArrayList<net.minecraft.item.ItemStack> drops,
+                EntityPlayer harvester, boolean isSilkTouching) {
+            super(x, y, z, world, block, blockMetadata);
+            this.fortuneLevel = fortuneLevel;
+            this.dropChance = dropChance;
+            this.isSilkTouching = isSilkTouching;
+        }
+    }
 }

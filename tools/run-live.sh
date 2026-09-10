@@ -88,6 +88,14 @@ pin_method "net/minecraft/block/Block/isOpaqueCube" "()Z"
 pin_method "net/minecraft/block/Block/getIdFromBlock" "(Lnet/minecraft/block/Block;)I"
 pin_field "net/minecraft/block/material/Material/rock"
 pin_field "net/minecraft/block/Block/opaque"
+pin_method "net/minecraft/world/World/spawnEntityInWorld" "(Lnet/minecraft/entity/Entity;)Z"
+pin_method "net/minecraft/entity/item/EntityItem/getEntityItem" "()Lnet/minecraft/item/ItemStack;"
+pin_method "net/minecraft/item/ItemStack/getItem" "()Lnet/minecraft/item/Item;"
+pin_field "net/minecraft/init/Items/diamond"
+pin_field "net/minecraft/entity/Entity/worldObj"
+pin_field "net/minecraft/entity/Entity/posX"
+pin_field "net/minecraft/entity/Entity/posY"
+pin_field "net/minecraft/entity/Entity/posZ"
 pin_method "net/minecraft/world/World/setBlock" "(IIILnet/minecraft/block/Block;)Z"
 pin_field "net/minecraft/world/World/provider"
 pin_field "net/minecraft/world/WorldProvider/dimensionId"
@@ -166,6 +174,9 @@ pin_uni 'net.minecraftforge.event.world.BlockEvent' 'public final int z;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent' ' world;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent' ' block;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent$BreakEvent' 'BreakEvent('
+pin_uni 'net.minecraftforge.event.world.BlockEvent$HarvestDropsEvent' 'HarvestDropsEvent('
+pin_uni 'net.minecraftforge.event.entity.living.LivingEvent' 'entityLiving'
+pin_uni 'net.minecraftforge.event.entity.living.LivingDropsEvent' 'LivingDropsEvent('
 pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerBlock(aji, java.lang.String)'
 pin_uni 'cpw.mods.fml.common.event.FMLPreInitializationEvent' 'FMLPreInitializationEvent('
 echo "ok b3-live : forge stubs pinned to universal"
@@ -313,9 +324,9 @@ set -e
 echo "ok b3-live : server ran ($BOOT_SECS s)"
 
 # 6. Fail loudly on any runtime refusal or linkage error.
-if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
+if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
   echo "FAIL b3-live : runtime refusal (see $SERV/boot-b3.log)"
-  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|Caused by" "$SERV/boot-b3.log"
+  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|Caused by" "$SERV/boot-b3.log"
   exit 1
 fi
 grep -a -q "matoubridge" "$SERV/boot-b3.log" \

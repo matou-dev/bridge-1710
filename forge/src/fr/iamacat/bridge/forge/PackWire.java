@@ -5,6 +5,8 @@ import fr.iamacat.bridge.Packs;
 import fr.iamacat.bridge.Packs.PackSpec;
 import fr.iamacat.spi.ConfigurablePack;
 import fr.iamacat.spi.ContentPack;
+import fr.iamacat.spi.MatouId;
+import java.util.Map;
 import net.minecraft.block.Block;
 import net.minecraft.world.World;
 
@@ -58,5 +60,14 @@ public final class PackWire {
         }
         ForgeContent.applyAll(pack, tick,
                 new WorldCellSink(world, y, block));
+    }
+
+    /**
+     * Plain-data states for a tick (the loot seal merges beside them —
+     * hub decisions/LOOT.md). A read-through, never a copy owner: the
+     * pack seals, the caller merges.
+     */
+    public Map<MatouId, Object> states(long tick) {
+        return pack.states(tick);
     }
 }

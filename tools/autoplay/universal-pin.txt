@@ -18,5 +18,7 @@ net.minecraftforge.event.world.BlockEvent public final int z;
 net.minecraftforge.event.world.BlockEvent  world;
 net.minecraftforge.event.world.BlockEvent  block;
 net.minecraftforge.event.world.BlockEvent$BreakEvent BreakEvent(
+net.minecraftforge.event.world.BlockEvent$HarvestDropsEvent HarvestDropsEvent(
+net.minecraftforge.event.entity.living.LivingDropsEvent LivingDropsEvent(
 cpw.mods.fml.common.Mod modid()
 cpw.mods.fml.common.eventhandler.EventBus register(
