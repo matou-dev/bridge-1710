@@ -151,8 +151,9 @@ public class AutoplayMod {
     static final int LOOT_BEAST_DELAY = 5;
     static final int LOOT_TIMEOUT = 600;
     static final boolean SPAWN = "1".equals(System.getenv("SPAWN"));
-    /** Mirrors {@code MatouBridgeMod.SPAWN_CAP}: the companion counts
-     * beasts, the bridge owns the bound — a drift here fails the proof
+    /** Mirrors the content cap ({@code owned.matou mob my_beast cap},
+     * transported by the bridge spawn wire): the companion counts
+     * beasts, the content owns the bound — a drift here fails the proof
      * loudly instead of asserting a stale cap silently. */
     static final int SPAWN_CAP = 4;
     /** Mirrors the content hp ({@code owned.matou mob my_beast hp} via

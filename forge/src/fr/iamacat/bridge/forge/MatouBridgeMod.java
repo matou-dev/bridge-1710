@@ -120,28 +120,26 @@ public final class MatouBridgeMod {
     /** Loot scope: the registered ore only (registry name, operator
      * domain — content names stay in example1). Other harvests are not
      * the loot's business (fortune/silk modifiers are an explicit
-     * non-goal). */
+     * non-goal). T2 moves this to the operator wire block; T1 keeps the
+     * constant, only spawn numbers and the loot count went content-side.
+     */
     static final String LOOT_ORE = "example1:my_ore";
-    /** Loot policy: one carrier per due harvest (no fortune — the pure
-     * job reads it as a snapshot state, never a default). A constant,
-     * never a default: the proof counts carriers per harvest. */
-    static final long LOOT_COUNT = 1L;
     /** Spawn switch (DEV proof opt-in): landing plus veto stay passive
      * unless {@code SPAWN=1}, so union and loot runs never see a beast. */
     static final boolean SPAWN = "1".equals(System.getenv("SPAWN"));
-    /** Spawn policy: living cap — a full census lands nothing, the join
-     * veto holds it. A constant, never a default: the proof counts beasts
-     * (the companion mirrors it, see its SPAWN_CAP note). */
-    static final long SPAWN_CAP = 4L;
-    /** Spawn policy: landings per tick while room remains. A constant,
-     * never a default: the proof watches the census fill one per tick. */
-    static final long SPAWN_BUDGET = 1L;
-    /** Spawn band: pads land just above the union slices (63..65), so beasts
-     * drop onto roof or plane and never inside a block. Entities never
-     * pollute the block verdict either way. Constants, never defaults:
-     * the pure job reads them as snapshot states. */
-    static final long SPAWN_YMIN = 66L;
-    static final long SPAWN_YMAX = 68L;
+    /** Spawn policy, sealed from the content table at wire time (hub
+     * decisions/SPAWN.md content-decides tranche): cap, per-tick budget
+     * and y band the author chose in {@code owned.matou}. The bridge
+     * transports them into the seal, it never owns a spawn number. The
+     * companion mirrors the cap (see its SPAWN_CAP note). */
+    private long spawnCap;
+    private long spawnBudget;
+    private long spawnYMin;
+    private long spawnYMax;
+    /** Loot policy, sealed from the content table at wire time
+     * (content-decides tranche): items per harvest the author chose.
+     * Transported, never owned. */
+    private long lootCount;
 
     private final List<PackWire> wires = new ArrayList<PackWire>();
     private final MinedStore mined = new MinedStore();
@@ -208,7 +206,11 @@ public final class MatouBridgeMod {
                     + owned + "> (one table per bridge)");
         }
         ownedPath = owned.iterator().next();
-        lootTable = LootTable.fromFile(ownedPath).drops();
+        LootTable wired = LootTable.fromFile(ownedPath);
+        lootTable = wired.drops();
+        lootCount = wired.count();
+        System.out.println("[MatouBridge] loot wired <" + lootTable
+                + "> count <" + lootCount + ">");
         ore = Block.getBlockFromName(LOOT_ORE);
         if (ore == null) {
             throw new IllegalArgumentException("E_LOOT_ORE:unknown <"
@@ -221,13 +223,15 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Spawn wiring: the single mob ref plus its spec hp from the same
-     * owned content the loot table came from (parsed once, like
-     * registration — never on the tick path). The hp lands on the
-     * beast's max-health attribute at every landing (hp tranche, hub
-     * decisions/SPAWN.md) — a spec field with no live reader would be a
-     * silent default. No owned file anywhere means spawn stays passive
-     * (Q1 cohabitation): the hooks gate on the null mob.
+     * Spawn wiring: the single mob ref plus its spec hp plus its
+     * authorial spawn policy from the same owned content the loot table
+     * came from (parsed once, like registration — never on the tick
+     * path). The hp lands on the beast's max-health attribute at every
+     * landing (hp tranche, hub decisions/SPAWN.md) — a spec field with no
+     * live reader would be a silent default; the same holds for cap,
+     * budget and band (content-decides tranche). No owned file anywhere
+     * means spawn stays passive (Q1 cohabitation): the hooks gate on the
+     * null mob.
      */
     private void wireSpawn() {
         if (ownedPath == null) {
@@ -236,8 +240,14 @@ public final class MatouBridgeMod {
         SpawnTable table = SpawnTable.fromFile(ownedPath);
         spawnMob = table.mob();
         spawnHp = table.hp();
+        spawnCap = table.cap();
+        spawnBudget = table.budget();
+        spawnYMin = table.yMin();
+        spawnYMax = table.yMax();
         System.out.println("[MatouBridge] spawn wired <" + spawnMob
-                + "> hp <" + spawnHp + ">");
+                + "> hp <" + spawnHp + "> cap <" + spawnCap
+                + "> budget <" + spawnBudget + "> y <" + spawnYMin
+                + ".." + spawnYMax + ">");
     }
 
     /**
@@ -385,10 +395,10 @@ public final class MatouBridgeMod {
         // entity resolves through its declaring base (EntityEvent), never
         // through the beast or the join subclass.
         Entity body = event.entity;
-        if (census.size() >= SPAWN_CAP) {
+        if (census.size() >= spawnCap) {
             event.setCanceled(true);
             System.out.println("[MatouBridge] spawn vetoed <beast> at tick "
-                    + tick + " (census at cap " + SPAWN_CAP + ")");
+                    + tick + " (census at cap " + spawnCap + ")");
             return;
         }
         int x = (int) Math.floor(body.posX);
@@ -420,11 +430,11 @@ public final class MatouBridgeMod {
         reconcile(world, now);
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>(
                 wires.get(0).states(now));
-        states.putAll(SpawnSeal.seal(census, spawnMob, SPAWN_CAP,
-                SPAWN_BUDGET, SPAWN_YMIN, SPAWN_YMAX));
+        states.putAll(SpawnSeal.seal(census, spawnMob, spawnCap,
+                spawnBudget, spawnYMin, spawnYMax));
         Snapshot snap = ForgeSnapshot.snapshot(now, states);
         List<String> due = spawn.decide(snap);
-        int slots = census.slotsDue((int) SPAWN_CAP, (int) SPAWN_BUDGET);
+        int slots = census.slotsDue((int) spawnCap, (int) spawnBudget);
         if (slots != due.size()) {
             throw new IllegalStateException("E_SPAWN_SEAL:diverged <slots="
                     + slots + " due=" + due + "> at tick " + now);
@@ -539,7 +549,7 @@ public final class MatouBridgeMod {
         }
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>(
                 wires.get(0).states(now));
-        states.putAll(LootSeal.seal(drops, lootTable, LOOT_COUNT));
+        states.putAll(LootSeal.seal(drops, lootTable, lootCount));
         Snapshot snap = ForgeSnapshot.snapshot(now, states);
         List<String> due = loot.decide(snap);
         for (String cell : due) {
@@ -568,7 +578,7 @@ public final class MatouBridgeMod {
             int cut = harvest.indexOf(':');
             String head = harvest.substring(0, cut);
             String item = lootTable.get(harvest.substring(cut + 1));
-            for (long c = 0; c < LOOT_COUNT; c++) {
+            for (long c = 0; c < lootCount; c++) {
                 out.add(head + ":" + item);
             }
         }

@@ -54,14 +54,16 @@ public final class SpawnCheck {
         System.exit(1);
     }
 
-    private static String table() {
+    private static SpawnTable table() {
         return SpawnTable.fromFile(
-                "../example1/content/owned.matou").mob();
+                "../example1/content/owned.matou");
     }
 
     private static Snapshot seal(SpawnStore store, long tick) {
+        SpawnTable wired = table();
         Map<MatouId, Object> states =
-                SpawnSeal.seal(store, table(), 4L, 1L, 66L, 68L);
+                SpawnSeal.seal(store, wired.mob(), wired.cap(),
+                        wired.budget(), wired.yMin(), wired.yMax());
         return ForgeSnapshot.snapshot(tick, states);
     }
 
@@ -75,8 +77,15 @@ public final class SpawnCheck {
     public static void main(String[] args) {
         SpawnJob job = new SpawnJob();
 
-        // Table wires from the sibling content (single mob funds spawn).
-        check(MOB.equals(table()), "table wires beast");
+        // Table wires from the sibling content (single mob funds spawn,
+        // policy included — the gate proves content-decided numbers ride
+        // the seal, never bridge constants).
+        SpawnTable wired = table();
+        check(MOB.equals(wired.mob()), "table wires beast");
+        check(wired.cap() == 4L, "table wires authorial cap");
+        check(wired.budget() == 1L, "table wires authorial budget");
+        check(wired.yMin() == 66L && wired.yMax() == 68L,
+                "table wires authorial y band");
 
         // Store: record, release, budgeted slots on both sides of cap.
         SpawnStore store = new SpawnStore();
@@ -130,7 +139,8 @@ public final class SpawnCheck {
         SpawnStore js = new SpawnStore();
         js.record("11", "1,66,2:" + MOB, 100L);
         List<String> jdue = job.decide(seal(js, 110L));
-        check(jdue.size() == js.slotsDue(4, 1),
+        check(jdue.size() == js.slotsDue((int) wired.cap(),
+                (int) wired.budget()),
                 "job decides the budgeted slots");
         check(jdue.size() == 1
                 && jdue.get(0).matches(
@@ -156,21 +166,22 @@ public final class SpawnCheck {
         // routes through the shipped SpawnSeal, so every assertion below
         // exercises the live path).
         Map<MatouId, Object> st = SpawnSeal.seal(seeded(), MOB,
-                4L, 1L, 66L, 68L);
+                wired.cap(), wired.budget(), wired.yMin(), wired.yMax());
         check(st.get(SpawnJob.CENSUS) instanceof Map,
                 "seal carries example1.spawn:census");
         check(MOB.equals(st.get(SpawnJob.TABLE)),
                 "seal carries example1.spawn:table");
-        check(Long.valueOf(4L).equals(st.get(SpawnJob.CAP)),
+        check(Long.valueOf(wired.cap()).equals(st.get(SpawnJob.CAP)),
                 "seal carries example1.spawn:cap");
-        check(Long.valueOf(1L).equals(st.get(SpawnJob.BUDGET)),
+        check(Long.valueOf(wired.budget()).equals(st.get(SpawnJob.BUDGET)),
                 "seal carries example1.spawn:budget");
-        check(Arrays.asList(Long.valueOf(66L), Long.valueOf(68L)).equals(
+        check(Arrays.asList(Long.valueOf(wired.yMin()),
+                Long.valueOf(wired.yMax())).equals(
                 st.get(SpawnJob.Y)), "seal carries example1.spawn:y");
         SpawnStore iso = new SpawnStore();
         iso.record("1", "1,66,2:" + MOB, 5L);
         Map<MatouId, Object> snap0 = SpawnSeal.seal(iso, MOB,
-                4L, 1L, 66L, 68L);
+                wired.cap(), wired.budget(), wired.yMin(), wired.yMax());
         iso.record("2", "9,67,9:" + MOB, 6L);
         check(((Map<?, ?>) snap0.get(SpawnJob.CENSUS)).size() == 1,
                 "sealed census is a copy, later records never leak");
@@ -208,12 +219,14 @@ public final class SpawnCheck {
 
         // Comparateur: budgeted slots over the census equal the job
         // decision size tick by tick over the same sealed states (same
-        // order, same cap boundary), at budgets 1..2.
+        // order, same cap boundary), at budgets 1..2 over the wired cap.
         for (int budget = 1; budget <= 2; budget++) {
             for (long tick = 95L; tick <= 125L; tick += 10L) {
-                int viaStore = seeded().slotsDue(4, budget);
+                int viaStore = seeded().slotsDue(
+                        (int) wired.cap(), budget);
                 Map<MatouId, Object> states = SpawnSeal.seal(
-                        seeded(), MOB, 4L, budget, 66L, 68L);
+                        seeded(), MOB, wired.cap(), budget,
+                        wired.yMin(), wired.yMax());
                 List<String> viaJob = job.decide(
                         ForgeSnapshot.snapshot(tick, states));
                 check(viaJob.size() == viaStore,

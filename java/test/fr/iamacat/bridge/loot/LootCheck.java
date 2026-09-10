@@ -58,9 +58,14 @@ public final class LootCheck {
                 "../example1/content/owned.matou").drops();
     }
 
+    private static long tableCount() {
+        return LootTable.fromFile(
+                "../example1/content/owned.matou").count();
+    }
+
     private static Snapshot seal(DropStore store, long tick) {
         Map<MatouId, Object> states =
-                LootSeal.seal(store, table(), 1L);
+                LootSeal.seal(store, table(), tableCount());
         return ForgeSnapshot.snapshot(tick, states);
     }
 
@@ -93,13 +98,16 @@ public final class LootCheck {
     public static void main(String[] args) {
         LootJob job = new LootJob();
 
-        // Table wires from the sibling content (single mob funds ore+beast).
+        // Table wires from the sibling content (single mob funds ore+beast,
+        // count included — the gate proves the content-decided number rides
+        // the seal, never a bridge constant).
         Map<String, String> wires = table();
         check(wires.size() == 2, "table wires 2 kinds");
         check("example1.content:my_gem".equals(wires.get(LootJob.ORE)),
                 "table ore pays gem");
         check("example1.content:my_gem".equals(wires.get(LootJob.BEAST)),
                 "table beast pays gem");
+        check(tableCount() == 1L, "table wires authorial count");
 
         // Store: record then claim on both sides of the boundary.
         DropStore store = new DropStore();
@@ -152,21 +160,24 @@ public final class LootCheck {
         // Seal: contents, copy isolation, refusals (the helper above
         // routes through the shipped LootSeal, so every assertion below
         // exercises the live path).
-        Map<MatouId, Object> st = LootSeal.seal(seeded(), wires, 1L);
+        Map<MatouId, Object> st = LootSeal.seal(seeded(), wires,
+                tableCount());
         check(st.get(LootJob.HARVESTED) instanceof Map,
                 "seal carries example1.loot:harvested");
         check(wires.equals(st.get(LootJob.TABLE)),
                 "seal carries example1.loot:table");
-        check(Long.valueOf(1L).equals(st.get(LootJob.COUNT)),
+        check(Long.valueOf(tableCount()).equals(st.get(LootJob.COUNT)),
                 "seal carries example1.loot:count");
         DropStore iso = new DropStore();
         iso.record("1,2,3:" + LootJob.ORE, 5L);
-        Map<MatouId, Object> snap0 = LootSeal.seal(iso, wires, 1L);
+        Map<MatouId, Object> snap0 = LootSeal.seal(iso, wires,
+                tableCount());
         iso.record("9,9,9:" + LootJob.BEAST, 6L);
         check(((Map<?, ?>) snap0.get(LootJob.HARVESTED)).size() == 1,
                 "sealed harvests are a copy, later records never leak");
         Map<String, String> mut = new LinkedHashMap<String, String>(wires);
-        Map<MatouId, Object> snapT = LootSeal.seal(seeded(), mut, 1L);
+        Map<MatouId, Object> snapT = LootSeal.seal(seeded(), mut,
+                tableCount());
         mut.put(LootJob.ORE, "example1.content:nope");
         check(wires.equals(snapT.get(LootJob.TABLE)),
                 "sealed table is a copy, later edits never leak");
