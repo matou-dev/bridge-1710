@@ -212,6 +212,30 @@ mkdir -p "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/forge" "$BLD/jars"
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/ex1" $(find ../example1/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi" -d "$BLD/mini" $(find ../minimap/java/src -name '*.java')
 "$J8/javac" -source 8 -target 8 -nowarn -cp "$BLD/spi:$BLD/ex1" -d "$BLD/forge" $(find java/src tools/live/stub forge/src -name '*.java')
+# 3b. @SideOnly must survive into RuntimeVisibleAnnotations on the exact
+#     compiled bytes: Forge 1.7.10 strips client-only methods on dedicated
+#     servers only when the annotation is runtime-visible (real SideOnly is
+#     RUNTIME, measured by javap on the pinned universal). A stub without
+#     retention compiles it invisible, the strip silently misses, and mod
+#     load dies resolving client classes (NoClassDefFoundError: ModelPig —
+#     found live on T4 bytes, never again silently). javap -v names the
+#     block, never the pool ref.
+"$J8/javap" -v -p -cp "$BLD/forge" fr.iamacat.bridge.forge.Example1Mod > "$BLD/sideonly-javap.txt"
+python3 - "$BLD/sideonly-javap.txt" <<'EOF'
+import sys
+txt = open(sys.argv[1]).read()
+i = txt.find("registerBeastRenderer();")
+if i < 0:
+    print("FAIL b3-live : registerBeastRenderer absent from javap")
+    sys.exit(1)
+block = txt[i:i + 4000]
+j = block.find("RuntimeVisibleAnnotations")
+k = block.find("RuntimeInvisibleAnnotations")
+if j < 0 or (k >= 0 and k < j):
+    print("FAIL b3-live : @SideOnly invisible on registerBeastRenderer (server strip would miss it)")
+    sys.exit(1)
+print("ok b3-live : SideOnly runtime-visible on registerBeastRenderer")
+EOF
 EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
 printf 'Manifest-Version: 1.0\nImplementation-Version: %s\n' "$VERSION" > "$BLD/MANIFEST.MF"
 cat > "$BLD/mcmod.info" <<EOF
