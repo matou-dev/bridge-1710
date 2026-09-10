@@ -80,6 +80,11 @@ pin_field() {
     || { echo "FAIL b3-live : stub field unpinned <$1>"; exit 1; }
 }
 pin_method "net/minecraft/block/Block/getBlockFromName" "(Ljava/lang/String;)Lnet/minecraft/block/Block;"
+pin_method "net/minecraft/block/Block/setBlockName" "(Ljava/lang/String;)Lnet/minecraft/block/Block;"
+pin_method "net/minecraft/block/Block/setHardness" "(F)Lnet/minecraft/block/Block;"
+pin_method "net/minecraft/block/Block/isOpaqueCube" "()Z"
+pin_method "net/minecraft/block/Block/getIdFromBlock" "(Lnet/minecraft/block/Block;)I"
+pin_field "net/minecraft/block/material/Material/rock"
 pin_method "net/minecraft/world/World/setBlock" "(IIILnet/minecraft/block/Block;)Z"
 pin_field "net/minecraft/world/World/provider"
 pin_field "net/minecraft/world/WorldProvider/dimensionId"
@@ -155,6 +160,8 @@ pin_uni 'net.minecraftforge.event.world.BlockEvent' 'public final int z;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent' ' world;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent' ' block;'
 pin_uni 'net.minecraftforge.event.world.BlockEvent$BreakEvent' 'BreakEvent('
+pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerBlock(net.minecraft.block.Block, java.lang.String)'
+pin_uni 'cpw.mods.fml.common.event.FMLPreInitializationEvent' 'FMLPreInitializationEvent('
 echo "ok b3-live : forge stubs pinned to universal"
 
 # 3. Build all mod jars with Java 8. forge/ compiles against the pinned
@@ -270,7 +277,7 @@ if [ "${BUILD_ONLY:-}" = "1" ]; then
   cp "$BLD/jars/matou-minimap.jar" "dist/matou-minimap-$VERSION.jar"
   cp "$BLD/jars/matoubridge-reobf.jar" "dist/matoubridge-$VERSION.jar"
   cp ../example1/content/owned.matou ../example1/content/additive.matou ../example1/content/structure.matou dist/matou-content/
-  printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\n# Wire y=63 keeps plane cells on their own slice, off the structure slices (64..65).\nfr.iamacat.example1.ExamplePack 63 minecraft:stone ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou structureFile=<SERVER>/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone\n' > dist/packs.cfg.example
+  printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\n# Wire y=63 keeps plane cells on their own slice, off the structure slices (64..65).\n# The wire block is the registered custom ore (preInit registers example1:my_ore from owned.matou); aliases stay vanilla stone.\nfr.iamacat.example1.ExamplePack 63 example1:my_ore ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou structureFile=<SERVER>/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone\n' > dist/packs.cfg.example
   (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou matou-content/structure.matou packs.cfg.example > SHA256SUMS.txt)
   (cd dist && sha256sum -c SHA256SUMS.txt)
   echo "ok r2-release : dist/ assembled (VERSION=$VERSION)"
@@ -286,7 +293,7 @@ rm -rf "$SERV/matou-content" && cp -r ../example1/content "$SERV/matou-content"
 # Wire y=63: plane cells stay on their own slice, off the structure
 # slices (64..65), so the verdict stays per-shape sensitive despite the
 # set collapse (a 2D and a 3D cell can share x,z, never y).
-printf 'fr.iamacat.example1.ExamplePack 63 minecraft:stone ownedFile=%s/matou-content/owned.matou scatterFile=%s/matou-content/additive.matou structureFile=%s/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone\n' "$SERV" "$SERV" "$SERV" > "$SERV/config/matoubridge/packs.cfg"
+printf 'fr.iamacat.example1.ExamplePack 63 example1:my_ore ownedFile=%s/matou-content/owned.matou scatterFile=%s/matou-content/additive.matou structureFile=%s/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone\n' "$SERV" "$SERV" "$SERV" > "$SERV/config/matoubridge/packs.cfg"
 echo "eula=true" > "$SERV/eula.txt"
 printf 'online-mode=false\nlevel-type=FLAT\ngamemode=1\ndifficulty=0\nmotd=B3 live proof\nmax-tick-time=-1\n' > "$SERV/server.properties"
 rm -rf "$SERV/world" "$SERV/logs"
@@ -298,9 +305,9 @@ set -e
 echo "ok b3-live : server ran ($BOOT_SECS s)"
 
 # 6. Fail loudly on any runtime refusal or linkage error.
-if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
+if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
   echo "FAIL b3-live : runtime refusal (see $SERV/boot-b3.log)"
-  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|Caused by" "$SERV/boot-b3.log"
+  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|Caused by" "$SERV/boot-b3.log"
   exit 1
 fi
 grep -a -q "matoubridge" "$SERV/boot-b3.log" \
@@ -308,14 +315,20 @@ grep -a -q "matoubridge" "$SERV/boot-b3.log" \
 echo "ok b3-live : bind clean, ticks clean"
 
 # 7. Positive proof: world blocks in chunks (0..1, -1..1) at y=63..65 must
-#    equal the pure decision union — stone only, nothing foreign, nothing
-#    missing. Plane cells land at the wire y=63, volume cells at their own
-#    y=64..65; structure offsets reach x,z=17, and the hut anchor z=-4
-#    spills into chunk row -1 (region r.0.-1.mca) — hence the 6-chunk,
-#    3-slice read.
+#    equal the pure decision union — nothing foreign, nothing missing.
+#    Plane cells land the wire block at y=63 (the registered custom ore,
+#    whose runtime numeric ID is dynamic — resolved below from the
+#    preInit registration line in the boot log, never hardcoded); volume
+#    cells land at their own y=64..65 under their landable names (vanilla
+#    stone, frozen ID 1). Structure offsets reach x,z=17, and the hut
+#    anchor z=-4 spills into chunk row -1 (region r.0.-1.mca) — hence the
+#    6-chunk, 3-slice read.
 "$J8/javac" -cp "$BLD/spi:$BLD/ex1" -d "$BLD" tools/live/CellUnion.java
 "$J8/java" -cp "$BLD:$BLD/spi:$BLD/ex1" CellUnion \
   "$SERV/config/matoubridge/packs.cfg" 4000 "$BLD/union.txt"
+ORE_ID=$(grep -a -o '\[MatouBridge\] registered <example1:my_ore> id [0-9][0-9]*' "$SERV/boot-b3.log" | tail -n 1 | grep -a -o '[0-9][0-9]*$' || true)
+[ -n "$ORE_ID" ] || { echo "FAIL b3-live : my_ore registration line absent from boot log (preInit never registered? see $SERV/boot-b3.log)"; exit 1; }
+echo "ok b3-live : my_ore id $ORE_ID (dynamic, from boot log)"
 : > "$BLD/world.txt"
 for spec in "r.0.0.mca 0 0" "r.0.0.mca 1 0" "r.0.0.mca 0 1" \
     "r.0.0.mca 1 1" "r.0.-1.mca 0 -1" "r.0.-1.mca 1 -1"; do
@@ -327,39 +340,59 @@ for spec in "r.0.0.mca 0 0" "r.0.0.mca 1 0" "r.0.0.mca 0 1" \
       >> "$BLD/world.txt"
   done
 done
-python3 - "$BLD/union.txt" "$BLD/world.txt" "$SERV/config/matoubridge/packs.cfg" <<'EOF'
+python3 - "$BLD/union.txt" "$BLD/world.txt" "$SERV/config/matoubridge/packs.cfg" "minecraft:stone=1,example1:my_ore=$ORE_ID" <<'EOF'
 import sys
-wire_y = None
+# Block names resolve to numeric IDs through the argv table (frozen
+# vanilla IDs plus the dynamic custom IDs the shell resolved from the
+# boot log) — never hardcoded, never guessed. A world name outside the
+# table fails loudly (extend the table explicitly).
+table = {}
+for pair in sys.argv[4].split(","):
+    name, num = pair.split("=", 1)
+    table[name] = num
+wire_y, wire_block = None, None
 for line in open(sys.argv[3]):
     line = line.strip()
     if line and not line.startswith("#"):
-        wire_y = int(line.split()[1])
+        toks = line.split()
+        wire_y, wire_block = int(toks[1]), toks[2]
 if wire_y is None:
     print("FAIL b3-live : no wire in packs.cfg")
     sys.exit(1)
-u = set()
+if wire_block not in table:
+    print("FAIL b3-live : no numeric ID for wire block <%s>" % wire_block)
+    sys.exit(1)
+u = {}
 for line in open(sys.argv[1]):
     cell = line.split()[0]
-    if ":" in cell:
-        x, rest = cell.split(",", 1)
-        y, z = rest.split(",", 1)[0], rest.split(",", 1)[1].split(":")[0]
-        u.add((int(x), int(y), int(z)))
+    parts = cell.split(",")
+    if len(parts) == 3 and ":" in parts[2]:
+        z, bname = parts[2].split(":", 1)
+        pos = (int(parts[0]), int(parts[1]), int(z))
     else:
         x, z = cell.split(",")
-        u.add((int(x), wire_y, int(z)))
+        pos, bname = (int(x), wire_y, int(z)), wire_block
+    if bname not in table:
+        print("FAIL b3-live : no numeric ID for block <%s> (extend the table, never guess)" % bname)
+        sys.exit(1)
+    u[pos] = table[bname]
 rows = [l.split() for l in open(sys.argv[2])]
 w = {(int(x), int(y), int(z)): i for x, y, z, i in rows}
 if not w:
     print("FAIL b3-live : world empty at y=63..65 (no tick applied?)")
     sys.exit(1)
-if set(w.values()) != {"1"}:
-    print("FAIL b3-live : foreign block ids %s" % sorted(set(w.values())))
+if set(w.values()) - set(table.values()):
+    print("FAIL b3-live : foreign block ids %s" % sorted(set(w.values()) - set(table.values())))
     sys.exit(1)
-if set(w) - u:
-    print("FAIL b3-live : world cells outside pure union %s" % sorted(set(w) - u)[:5])
+bad = {p: (w[p], u.get(p)) for p in w if u.get(p) != w[p]}
+if bad:
+    print("FAIL b3-live : id mismatch at %s (want pure union ids)" % sorted(bad.items())[:5])
     sys.exit(1)
-if u - set(w):
-    print("FAIL b3-live : pure cells missing from world (%d)" % len(u - set(w)))
+if set(w) - set(u):
+    print("FAIL b3-live : world cells outside pure union %s" % sorted(set(w) - set(u))[:5])
     sys.exit(1)
-print("ok b3-live : world == pure union (%d cells, stone only)" % len(w))
+if set(u) - set(w):
+    print("FAIL b3-live : pure cells missing from world (%d)" % len(set(u) - set(w)))
+    sys.exit(1)
+print("ok b3-live : world == pure union (%d cells, ids %s)" % (len(w), ",".join(sorted(set(w.values())))))
 EOF
