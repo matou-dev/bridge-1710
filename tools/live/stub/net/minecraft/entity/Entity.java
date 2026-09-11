@@ -15,6 +15,13 @@ import net.minecraft.world.World;
  * tools/autoplay/want.txt); the type serves the drop sink ({@code spawnEntityInWorld}) and the
  * living-drop event. Drift fails loudly on the owning side.
  *
+ * <p>Renderer tranche (hub decisions/MATOU_MODEL.md, ported from 1122):
+ * {@code lastTickPosX/Y/Z} plus {@code rotationYaw/Pitch} serve the
+ * client-only {@code InstancedMeshRenderer} interpolation (pinned to the
+ * 1.7.10 SRG by tools/run-live.sh, same searge practice as every row
+ * above — SRG {@code field_70142_S}, {@code field_70137_T},
+ * {@code field_70136_U}, {@code field_70177_z}, {@code field_70125_A}).
+ *
  * <p>NEVER final on a primitive field here (see the spike note on
  * tools/live/stub/net/minecraftforge/event/world/BlockEvent.java):
  * non-final fields read live, final primitives with initializers would
@@ -25,6 +32,11 @@ public class Entity {
     public double posX;
     public double posY;
     public double posZ;
+    public double lastTickPosX;
+    public double lastTickPosY;
+    public double lastTickPosZ;
+    public float rotationYaw;
+    public float rotationPitch;
     public boolean isDead;
 
     public void setPositionAndRotation(double x, double y, double z,

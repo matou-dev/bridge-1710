@@ -283,12 +283,18 @@ public final class Example1Mod {
      * never resolve the client classes — a missing mapping would die
      * loudly on the client instead (null renderer at first tracked
      * spawn).
+     *
+     * <p>Model tranche (hub decisions/MATOU_MODEL.md, ported from 1122):
+     * the instanced overlay draws the SPI-baked beast mesh on top — same
+     * two-renderer shape as 1122 (pig renderer kept, instanced overlay
+     * added), version-native bus call below.
      */
     @SideOnly(Side.CLIENT)
     private static void registerBeastRenderer() {
         RenderingRegistry.registerEntityRenderingHandler(
                 MatouEntity.class,
                 new RenderPig(new ModelPig(), new ModelPig(0.5F), 0.7F));
+        InstancedMeshRenderer.initClient();
     }
 
     /**

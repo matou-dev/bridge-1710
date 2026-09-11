@@ -112,6 +112,20 @@ pin_field "net/minecraft/entity/Entity/isDead"
 pin_field "net/minecraft/world/World/provider"
 pin_field "net/minecraft/world/WorldProvider/dimensionId"
 pin_field "net/minecraft/world/World/isRemote"
+# Renderer tranche (hub decisions/MATOU_MODEL.md, ported from 1122): every
+# net/minecraft/* member the client-only InstancedMeshRenderer touches.
+# Anchors are srg-mcp.srg-derived above (same grep discipline — never
+# recalled): theWorld is the WorldClient-typed field_71441_e,
+# renderViewEntity the field_71451_h (a field on 1614, the 1122 method
+# does not exist here), getMinecraft func_71410_x.
+pin_method "net/minecraft/client/Minecraft/getMinecraft" "()Lnet/minecraft/client/Minecraft;"
+pin_field "net/minecraft/client/Minecraft/theWorld"
+pin_field "net/minecraft/client/Minecraft/renderViewEntity"
+pin_field "net/minecraft/entity/Entity/lastTickPosX"
+pin_field "net/minecraft/entity/Entity/lastTickPosY"
+pin_field "net/minecraft/entity/Entity/lastTickPosZ"
+pin_field "net/minecraft/entity/Entity/rotationYaw"
+pin_field "net/minecraft/entity/Entity/rotationPitch"
 echo "ok b3-live : stubs pinned to SRG"
 
 # 2. Provision the 1614 server once (idempotent, checksum-verified).
@@ -198,6 +212,11 @@ pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerBlock(aji, java.lan
 pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerItem(adb, java.lang.String)'
 pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'findItem(java.lang.String, java.lang.String)'
 pin_uni 'cpw.mods.fml.common.event.FMLPreInitializationEvent' 'FMLPreInitializationEvent('
+# Renderer tranche: the client frame event the instanced overlay
+# subscribes to (Forge-added, never obfuscated — presence is the pin,
+# same as every row above; 1614 carries partialTicks as a public field,
+# measured via javap on this same universal).
+pin_uni 'net.minecraftforge.client.event.RenderWorldLastEvent' 'partialTicks'
 echo "ok b3-live : forge stubs pinned to universal"
 
 # 3. Build all mod jars with Java 8. forge/ compiles against the pinned
@@ -337,8 +356,9 @@ if [ "${BUILD_ONLY:-}" = "1" ]; then
   cp "$BLD/jars/matou-minimap.jar" "dist/matou-minimap-$VERSION.jar"
   cp "$BLD/jars/matoubridge-reobf.jar" "dist/matoubridge-$VERSION.jar"
   cp ../example1/content/owned.matou ../example1/content/additive.matou ../example1/content/structure.matou ../example1/content/vein.matou dist/matou-content/
+  cp tools/live/my_beast.geo.json dist/my_beast.geo.json
   printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\n# Wire y=63 keeps plane cells on their own slice, off the structure slices (64..65).\n# The wire block is the registered custom ore (preInit registers example1:my_ore from owned.matou); aliases stay vanilla stone.\n# Vein clusters land on the BASE_Y=60 band (slices 60..61) as the registered ore via the veinblock alias.\nfr.iamacat.example1.ExamplePack 63 example1:my_ore ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou structureFile=<SERVER>/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone veinFile=<SERVER>/matou-content/vein.matou veinblock.example1.content:my_ore=example1:my_ore\n' > dist/packs.cfg.example
-  (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou matou-content/structure.matou matou-content/vein.matou packs.cfg.example > SHA256SUMS.txt)
+  (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou matou-content/structure.matou matou-content/vein.matou packs.cfg.example my_beast.geo.json > SHA256SUMS.txt)
   (cd dist && sha256sum -c SHA256SUMS.txt)
   echo "ok r2-release : dist/ assembled (VERSION=$VERSION)"
   exit 0
@@ -356,6 +376,12 @@ rm -rf "$SERV/matou-content" && cp -r ../example1/content "$SERV/matou-content"
 # clusters land on their own band (BASE_Y=60, slices 60..61) as the
 # registered ore through the veinblock alias.
 printf 'fr.iamacat.example1.ExamplePack 63 example1:my_ore ownedFile=%s/matou-content/owned.matou scatterFile=%s/matou-content/additive.matou structureFile=%s/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone veinFile=%s/matou-content/vein.matou veinblock.example1.content:my_ore=example1:my_ore\n' "$SERV" "$SERV" "$SERV" "$SERV" > "$SERV/config/matoubridge/packs.cfg"
+# Beast shape: the shipped Blockbench geometry the renderer bakes and the
+# hitboxes derive from (hub decisions/MATOU_MODEL.md, ported from 1122).
+# Deployed beside packs.cfg, operator-replaceable like it. The server
+# ignores it cleanly (client-only path — zero E_MODEL_* server-side or
+# the step 6 grep below fails loudly).
+cp tools/live/my_beast.geo.json "$SERV/config/matoubridge/my_beast.geo.json"
 echo "eula=true" > "$SERV/eula.txt"
 printf 'online-mode=false\nlevel-type=FLAT\ngamemode=1\ndifficulty=0\nmotd=B3 live proof\nmax-tick-time=-1\n' > "$SERV/server.properties"
 rm -rf "$SERV/world" "$SERV/logs"
@@ -366,10 +392,13 @@ set -e
 [ "$code" -eq 124 ] || { echo "FAIL b3-live : server exited early (code $code, see $SERV/boot-b3.log)"; exit 1; }
 echo "ok b3-live : server ran ($BOOT_SECS s)"
 
-# 6. Fail loudly on any runtime refusal or linkage error.
-if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
+# 6. Fail loudly on any runtime refusal or linkage error. E_MODEL rides
+# here since the model tranche (same as 1122: the server ignores the geo
+# cleanly, any server-side model refusal fails loudly instead of passing
+# silently).
+if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
   echo "FAIL b3-live : runtime refusal (see $SERV/boot-b3.log)"
-  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|Caused by" "$SERV/boot-b3.log"
+  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|Caused by" "$SERV/boot-b3.log"
   exit 1
 fi
 grep -a -q "matoubridge" "$SERV/boot-b3.log" \

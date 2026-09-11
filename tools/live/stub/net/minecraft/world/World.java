@@ -3,6 +3,7 @@ package net.minecraft.world;
 import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
+import java.util.List;
 
 /**
  * B3 compile stub: shape-only vanilla API used by {@code forge/} sources.
@@ -23,7 +24,7 @@ public class World {
     public WorldProvider provider;
     public boolean isRemote;
     public java.util.List<EntityPlayer> playerEntities;
-    public java.util.List loadedEntityList;
+    public List<Entity> loadedEntityList;
 
     public boolean setBlock(int x, int y, int z, Block block) {
         return false;

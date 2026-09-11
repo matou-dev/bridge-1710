@@ -1,8 +1,10 @@
 #!/bin/sh
 # Gate bridge-1710 : anti-contamination + skeleton pur + forge isole + live.
 # Etage 1 (toujours vert, sans MC) : zero-MC sur java/ + compile contre le
-# sibling ../spi + BridgeCheck. Etage 2 (Forge) : compile forge/ contre
-# MC 1.7.10 quand MC_JAR est fourni, skip sinon. Etage 3 (live, R1) :
+# sibling ../spi + BridgeCheck + ModelWireCheck. Etage 2 (Forge) : compile
+# forge/ contre tools/live/stub (shape-only, jamais execute) — vert sans
+# MC_JAR, plus autoplay-compile tripwire ; MC_JAR recompile contre le vrai
+# MC quand fourni, skip sinon. Etage 3 (live, R1) :
 # LIVE=1 runs tools/run-live.sh (needs Java 8 + 1614 SRG + network once,
 # B3_OFFLINE=1 reuses cache), skip otherwise. Jamais de chemin machine
 # en dur ici : l'env pertinent s'exporte (ex. MC_JAR=<minecraft>.jar).
@@ -74,7 +76,30 @@ java -cp java/build fr.iamacat.bridge.ForgeContentCheck
 java -cp java/build fr.iamacat.bridge.spike.RepopCheck
 java -cp java/build fr.iamacat.bridge.loot.LootCheck
 java -cp java/build fr.iamacat.bridge.spawn.SpawnCheck
-# Etage 2 : forge/ seul touche MC (Forge 10.13.4.1614). Sans MC_JAR : skip.
+java -cp java/build fr.iamacat.bridge.model.ModelWireCheck
+# Etage 2 : forge/ seul touche MC/Forge (10.13.4.1614). Stub shape-only,
+# pas de MC_JAR requis : vert partout, le live B3 prouve contre le vrai
+# jar (etage 3, LIVE=1). Porte du pattern 1122 (forge-2860-stub).
+# Clean before compile: javac never deletes stale classes, so a renamed or
+# deleted source would linger in forge/build and lie to surface scans.
+rm -rf forge/build && mkdir -p forge/build
+javac --release 8 -cp java/build -d forge/build $(find forge/src tools/live/stub -name '*.java')
+echo "ok (forge-1614-stub)"
+# Visual-tranche tripwire (found on 1122 2026-09-11, ported here with the
+# renderer: the autoplay companion had not compiled since the item
+# tranche because no gate built it, only run-client.sh AUTOPLAY=1 did, at
+# run time). DEV-only compile against stubs, never shipped, never run
+# here; tools/autoplay/stub is optional (1122 merged its shapes into
+# tools/live/stub — one Minecraft class only, duplicates never compile).
+mkdir -p build/auto
+AUTO_SRC="tools/autoplay/src tools/live/stub"
+[ -d tools/autoplay/stub ] && AUTO_SRC="$AUTO_SRC tools/autoplay/stub"
+# shellcheck disable=SC2086
+javac --release 8 -cp java/build:forge/build -d build/auto $(find $AUTO_SRC -name '*.java')
+echo "ok (autoplay-compile)"
+# Etage 2bis (Forge 10.13.4.1614, legacy) : recompile forge/ seul contre
+# le vrai MC 1.7.10 quand MC_JAR est fourni, skip sinon (le stub ci-dessus
+# est le gate vert partout). Etage 3 (live, R1) :
 if [ -z "${MC_JAR:-}" ]; then
   echo "skip forge (no MC_JAR)"
 else
