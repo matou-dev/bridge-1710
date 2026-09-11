@@ -32,6 +32,8 @@ public final class SpawnCheck {
     private static final String BRUTE = "example1.content:my_brute";
     private static final String BEAST_SHORT = "my_beast";
     private static final String BRUTE_SHORT = "my_brute";
+    private static final List<String> SHORT_MOBS =
+            Arrays.asList(BEAST_SHORT, BRUTE_SHORT);
 
     private static void check(boolean cond, String what) {
         if (!cond) {
@@ -364,11 +366,11 @@ public final class SpawnCheck {
         long[] effBeast = OperatorPolicy.effectiveSpawn(
                 content.cap(BEAST_SHORT), content.budget(BEAST_SHORT),
                 content.yMin(BEAST_SHORT), content.yMax(BEAST_SHORT),
-                bareSpecs);
+                BEAST_SHORT, SHORT_MOBS, bareSpecs);
         long[] effBrute = OperatorPolicy.effectiveSpawn(
                 content.cap(BRUTE_SHORT), content.budget(BRUTE_SHORT),
                 content.yMin(BRUTE_SHORT), content.yMax(BRUTE_SHORT),
-                bareSpecs);
+                BRUTE_SHORT, SHORT_MOBS, bareSpecs);
         check(effBeast[0] == 4L && effBeast[1] == 1L
                 && effBeast[2] == 66L && effBeast[3] == 68L
                 && effBrute[0] == 4L && effBrute[1] == 1L
@@ -379,11 +381,11 @@ public final class SpawnCheck {
         long[] overBeast = OperatorPolicy.effectiveSpawn(
                 content.cap(BEAST_SHORT), content.budget(BEAST_SHORT),
                 content.yMin(BEAST_SHORT), content.yMax(BEAST_SHORT),
-                capSpecs);
+                BEAST_SHORT, SHORT_MOBS, capSpecs);
         long[] overBrute = OperatorPolicy.effectiveSpawn(
                 content.cap(BRUTE_SHORT), content.budget(BRUTE_SHORT),
                 content.yMin(BRUTE_SHORT), content.yMax(BRUTE_SHORT),
-                capSpecs);
+                BRUTE_SHORT, SHORT_MOBS, capSpecs);
         check(overBeast[0] == 2L && overBeast[1] == 1L
                 && overBeast[2] == 66L && overBeast[3] == 68L
                 && overBrute[0] == 2L && overBrute[1] == 1L
@@ -395,11 +397,11 @@ public final class SpawnCheck {
         long[] fullBeast = OperatorPolicy.effectiveSpawn(
                 content.cap(BEAST_SHORT), content.budget(BEAST_SHORT),
                 content.yMin(BEAST_SHORT), content.yMax(BEAST_SHORT),
-                fullSpecs);
+                BEAST_SHORT, SHORT_MOBS, fullSpecs);
         long[] fullBrute = OperatorPolicy.effectiveSpawn(
                 content.cap(BRUTE_SHORT), content.budget(BRUTE_SHORT),
                 content.yMin(BRUTE_SHORT), content.yMax(BRUTE_SHORT),
-                fullSpecs);
+                BRUTE_SHORT, SHORT_MOBS, fullSpecs);
         check(fullBeast[0] == 2L && fullBeast[1] == 2L
                 && fullBeast[2] == 60L && fullBeast[3] == 61L
                 && fullBrute[0] == 2L && fullBrute[1] == 2L
@@ -445,25 +447,29 @@ public final class SpawnCheck {
                 "overridden policy seals and decides 2 slots per mob on its band");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec("example1:my_ore",
                                 "spawn.cap", "0")));
             }
         }, "zero operator cap");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec("example1:my_ore",
                                 "spawn.cap", "-1")));
             }
         }, "negative operator cap");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec("example1:my_ore",
                                 "spawn.cap", "x")));
             }
         }, "non-numeric operator cap");
         expectIAE(new Runnable() {
             @Override public void run() {
                 OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS,
                         specs(spec("example1:my_ore", "spawn.cap", "2"),
                                 spec("example1:my_ore",
                                         "spawn.cap", "3")));
@@ -471,28 +477,187 @@ public final class SpawnCheck {
         }, "differing operator cap");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec("example1:my_ore",
                                 "spawn.cpa", "2")));
             }
         }, "unknown operator key");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec("example1:my_ore",
                                 "spawn.y_min", "70")));
             }
         }, "operator band inverting content");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec("example1:my_ore",
                                 "spawn.y_min", "68",
                                 "spawn.y_max", "66")));
             }
         }, "operator inverted band");
         expectNPE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, null);
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, null);
             }
         }, "null specs");
+
+        // Per-mob operator overrides (per-mob tranche, hub
+        // decisions/VIRTUAL_HITBOXES.md): absent means content/global,
+        // the per-mob key wins for its mob only, a global-plus-per-mob
+        // pair resolves per mob, and every bad shape refuses loudly —
+        // the same rule the forge wire consumes per mob, exercised here
+        // through the shipped OperatorPolicy.
+        List<Packs.PackSpec> bruteCapSpecs = specs(spec(
+                "example1:my_ore", "spawn.cap.my_brute", "2"));
+        long[] pmBeast = OperatorPolicy.effectiveSpawn(
+                content.cap(BEAST_SHORT), content.budget(BEAST_SHORT),
+                content.yMin(BEAST_SHORT), content.yMax(BEAST_SHORT),
+                BEAST_SHORT, SHORT_MOBS, bruteCapSpecs);
+        long[] pmBrute = OperatorPolicy.effectiveSpawn(
+                content.cap(BRUTE_SHORT), content.budget(BRUTE_SHORT),
+                content.yMin(BRUTE_SHORT), content.yMax(BRUTE_SHORT),
+                BRUTE_SHORT, SHORT_MOBS, bruteCapSpecs);
+        check(pmBeast[0] == 4L && pmBeast[1] == 1L
+                && pmBeast[2] == 66L && pmBeast[3] == 68L
+                && pmBrute[0] == 2L && pmBrute[1] == 1L
+                && pmBrute[2] == 66L && pmBrute[3] == 68L,
+                "per-mob spawn.cap wins for its mob only");
+        check(OperatorPolicy.present(bruteCapSpecs,
+                "spawn.cap.my_brute"), "present per-mob key is present");
+        check(!OperatorPolicy.present(bruteCapSpecs,
+                "spawn.cap.my_beast"),
+                "absent per-mob key is not present");
+        List<Packs.PackSpec> agreedSpecs = specs(
+                spec("example1:my_ore", "spawn.cap.my_brute", "2"),
+                spec("example1:my_ore", "spawn.cap.my_brute", "2"));
+        long[] agreed = OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                BRUTE_SHORT, SHORT_MOBS, agreedSpecs);
+        check(agreed[0] == 2L, "agreed per-mob cap wins");
+        List<Packs.PackSpec> bothSpecs = specs(spec("example1:my_ore",
+                "spawn.cap", "3", "spawn.cap.my_brute", "2"));
+        long[] bothBeast = OperatorPolicy.effectiveSpawn(4L, 1L, 66L,
+                68L, BEAST_SHORT, SHORT_MOBS, bothSpecs);
+        long[] bothBrute = OperatorPolicy.effectiveSpawn(4L, 1L, 66L,
+                68L, BRUTE_SHORT, SHORT_MOBS, bothSpecs);
+        check(bothBeast[0] == 3L && bothBrute[0] == 2L,
+                "per-mob cap beats the global cap for its mob only");
+        List<Packs.PackSpec> bruteBandSpecs = specs(
+                spec("example1:my_ore", "spawn.budget.my_brute", "2",
+                        "spawn.y_min.my_brute", "60",
+                        "spawn.y_max.my_brute", "61"));
+        long[] bandBeast = OperatorPolicy.effectiveSpawn(4L, 1L, 66L,
+                68L, BEAST_SHORT, SHORT_MOBS, bruteBandSpecs);
+        long[] bandBrute = OperatorPolicy.effectiveSpawn(4L, 1L, 66L,
+                68L, BRUTE_SHORT, SHORT_MOBS, bruteBandSpecs);
+        check(bandBeast[0] == 4L && bandBeast[1] == 1L
+                && bandBeast[2] == 66L && bandBeast[3] == 68L
+                && bandBrute[0] == 4L && bandBrute[1] == 2L
+                && bandBrute[2] == 60L && bandBrute[3] == 61L,
+                "per-mob budget and band win independently per side");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BRUTE_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore",
+                                "spawn.cap.my_brute", "0")));
+            }
+        }, "zero per-mob cap");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BRUTE_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore",
+                                "spawn.budget.my_brute", "-1")));
+            }
+        }, "negative per-mob budget");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BRUTE_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore",
+                                "spawn.y_min.my_brute", "x")));
+            }
+        }, "non-numeric per-mob y");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BRUTE_SHORT, SHORT_MOBS,
+                        specs(spec("example1:my_ore",
+                                        "spawn.cap.my_brute", "2"),
+                                spec("example1:my_ore",
+                                        "spawn.cap.my_brute", "3")));
+            }
+        }, "differing per-mob cap");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore",
+                                "spawn.cpa.my_beast", "2")));
+            }
+        }, "unknown per-mob base");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore",
+                                "spawn.cap.nope", "2")));
+            }
+        }, "unknown per-mob mob");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore", "spawn.cap.", "2")));
+            }
+        }, "empty per-mob suffix");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore",
+                                "spawn.cap.my_beast.x", "2")));
+            }
+        }, "dotted per-mob suffix");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BRUTE_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore",
+                                "spawn.y_min.my_brute", "68",
+                                "spawn.y_max.my_brute", "66")));
+            }
+        }, "per-mob inverted band");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BRUTE_SHORT, SHORT_MOBS, specs(spec(
+                                "example1:my_ore", "spawn.y_max", "67",
+                                "spawn.y_min.my_brute", "68")));
+            }
+        }, "cross-level inverted band");
+        final List<String> nullMobs = null;
+        expectNPE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                        BEAST_SHORT, nullMobs, bareSpecs);
+            }
+        }, "null mobs");
+        expectNPE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, null,
+                        SHORT_MOBS, bareSpecs);
+            }
+        }, "null mob");
+        expectIAE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L, "nope",
+                        SHORT_MOBS, bareSpecs);
+            }
+        }, "unsealed mob");
 
         // Per-mob seal (second-beast tranche, hub
         // decisions/VIRTUAL_HITBOXES.md): a single-mob per-mob seal emits
@@ -678,15 +843,13 @@ public final class SpawnCheck {
             @Override public void run() { bad.slotsDue(0, 0, 1); }
         }, "zero scoped cap");
 
-        // Per-mob operator keys stay refused (named follow-up — global
-        // overrides apply uniformly per mob until that tranche lands).
-        expectIAE(new Runnable() {
-            @Override public void run() {
-                OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
-                        specs(spec("example1:my_ore",
-                                "spawn.cap.my_beast", "2")));
-            }
-        }, "per-mob operator key");
+        // Per-mob operator keys land here now (per-mob tranche above —
+        // the old E_SPAWN_WIRE:unknown refusal moved into the per-mob
+        // win battery: spawn.cap.my_beast=2 seals cap 2 for my_beast).
+        long[] moved = OperatorPolicy.effectiveSpawn(4L, 1L, 66L, 68L,
+                BEAST_SHORT, SHORT_MOBS, specs(spec("example1:my_ore",
+                        "spawn.cap.my_beast", "2")));
+        check(moved[0] == 2L, "moved per-mob refusal seals the win");
         System.out.println("ok spike-spawn : all");
     }
 }

@@ -153,14 +153,12 @@ public final class MatouBridgeMod {
     static final boolean SPAWN = "1".equals(System.getenv("SPAWN"));
     /** Spawn policy, sealed per mob from the content table at wire time
      * unless the operator {@code spawn.*} wins (hub decisions/SPAWN.md
-     * operator-override tranche): effective cap, per-tick budget and y
-     * band by qualified mob ref, in seal order. The bridge transports
+     * operator-override tranche plus the per-mob tranche in hub
+     * decisions/VIRTUAL_HITBOXES.md): effective cap, per-tick budget
+     * and y band by qualified mob ref, in seal order — the per-mob key
+     * wins, else the global key, else content. The bridge transports
      * them into the seal, it never owns a spawn number. The companion
-     * mirrors the effective cap (see its SPAWN_CAP note). Global
-     * overrides apply uniformly per mob — the same specs ride every
-     * mob's effectiveSpawn call, so an operator cap wins for all mobs
-     * alike; per-mob override keys are a named follow-up, never smuggled
-     * in here. */
+     * mirrors the effective cap (see its SPAWN_CAP note). */
     private final LinkedHashMap<String, Long> spawnCap =
             new LinkedHashMap<String, Long>();
     private final LinkedHashMap<String, Long> spawnBudget =
@@ -177,10 +175,10 @@ public final class MatouBridgeMod {
     /** Combat reach, sealed per mob from the content table at wire time
      * (hub decisions/VIRTUAL_HITBOXES.md combat-policy tranche):
      * effective eye-to-hitVec cutoff by short mob name, in seal order —
-     * content reach unless the operator {@code combat.reach} wins, the
-     * same specs riding every mob (uniform, like spawn — per-mob
-     * override keys are a named follow-up). The bridge transports it
-     * into the hook, it never owns a combat number. */
+     * content reach unless the operator {@code combat.reach} wins
+     * globally or {@code combat.reach.<mob>} wins for that mob
+     * (per-mob tranche, same precedence as spawn). The bridge
+     * transports it into the hook, it never owns a combat number. */
     private final LinkedHashMap<String, Double> combatReach =
             new LinkedHashMap<String, Double>();
     /** Loot policy, sealed from the content table at wire time unless
@@ -363,9 +361,10 @@ public final class MatouBridgeMod {
       * effective spawn policy from the first wire's pack policy (parsed
       * once at pack wire time, like registration — never on the tick
       * path): content cap/budget/band per mob unless the operator
-      * {@code spawn.*} wins (T2 operator-override tranche, applied with
-      * the same specs per mob — a global override wins uniformly, never
-      * per mob). The hp lands on each beast's max-health attribute at
+      * {@code spawn.*} wins (T2 operator-override tranche, per-mob
+      * tranche in hub decisions/VIRTUAL_HITBOXES.md — the per-mob key
+      * wins for its mob, else the global key wins uniformly, else
+      * content). The hp lands on each beast's max-health attribute at
       * every landing (hp tranche, hub decisions/SPAWN.md) — a spec field
       * with no live reader would be a silent default; the same holds for
       * the effective policy. No owned file anywhere means spawn stays
@@ -383,12 +382,15 @@ public final class MatouBridgeMod {
         PolicyPack policy = policy("E_SPAWN_POLICY");
         spawn = policy.spawnJob();
         String ns = contentNamespace();
-        for (String shortMob : policy.spawnMobs()) {
+        List<String> sealedShorts = new ArrayList<String>(
+                policy.spawnMobs());
+        for (String shortMob : sealedShorts) {
             long[] eff = OperatorPolicy.effectiveSpawn(
                     policy.spawnCap(shortMob),
                     policy.spawnBudget(shortMob),
                     policy.spawnYMin(shortMob),
-                    policy.spawnYMax(shortMob), specs);
+                    policy.spawnYMax(shortMob), shortMob, sealedShorts,
+                    specs);
             String qualified = ns + ":" + shortMob;
             if (spawnMob == null) {
                 spawnMob = qualified;
@@ -412,6 +414,24 @@ public final class MatouBridgeMod {
         }
         if (OperatorPolicy.present(specs, OperatorPolicy.SPAWN_Y_MAX)) {
             over.add("y_max");
+        }
+        for (String shortMob : sealedShorts) {
+            if (OperatorPolicy.present(specs,
+                    OperatorPolicy.SPAWN_CAP + "." + shortMob)) {
+                over.add("spawn.cap." + shortMob);
+            }
+            if (OperatorPolicy.present(specs,
+                    OperatorPolicy.SPAWN_BUDGET + "." + shortMob)) {
+                over.add("spawn.budget." + shortMob);
+            }
+            if (OperatorPolicy.present(specs,
+                    OperatorPolicy.SPAWN_Y_MIN + "." + shortMob)) {
+                over.add("spawn.y_min." + shortMob);
+            }
+            if (OperatorPolicy.present(specs,
+                    OperatorPolicy.SPAWN_Y_MAX + "." + shortMob)) {
+                over.add("spawn.y_max." + shortMob);
+            }
         }
         String spawnNote = over.isEmpty() ? ""
                 : " overridden <" + join(over) + ">";
@@ -450,8 +470,9 @@ public final class MatouBridgeMod {
       * wire time, like loot/spawn — never on the tick path). The tables
       * seal into the bridge model holder the beast reads at hit time;
       * each mob's effective reach (content reach unless the operator
-      * {@code combat.reach} wins — same uniform rule as spawn, the same
-      * specs riding every mob) lands in the hook's per-mob map
+      * {@code combat.reach} wins globally or {@code combat.reach.<mob>}
+      * wins for that mob — same precedence as spawn, per-mob tranche in
+      * hub decisions/VIRTUAL_HITBOXES.md) lands in the hook's per-mob map
       * (reach-override tranche, hub decisions/VIRTUAL_HITBOXES.md;
       * weakspot multipliers stay content-only, same split as
       * {@code spawnHp}). No owned file anywhere means combat stays
@@ -467,17 +488,29 @@ public final class MatouBridgeMod {
                 new LinkedHashMap<String, Map<String, Float>>();
         Map<String, Double> perMobReach =
                 new LinkedHashMap<String, Double>();
-        for (String mob : policy.combatMobs()) {
+        List<String> sealedMobs = new ArrayList<String>(
+                policy.combatMobs());
+        for (String mob : sealedMobs) {
             perMobWeakspots.put(mob, policy.combatWeakspots(mob));
             perMobReach.put(mob, Double.valueOf(policy.combatReach(mob)));
             combatReach.put(mob, Double.valueOf(
                     OperatorPolicy.effectiveCombatReach(
-                            policy.combatReach(mob), specs)));
+                            policy.combatReach(mob), mob, sealedMobs,
+                            specs)));
         }
         BeastModel.sealCombat(perMobWeakspots, perMobReach);
-        String combatNote = OperatorPolicy.present(specs,
-                OperatorPolicy.COMBAT_REACH) ? " overridden <combat.reach>"
-                : "";
+        List<String> over = new ArrayList<String>();
+        if (OperatorPolicy.present(specs, OperatorPolicy.COMBAT_REACH)) {
+            over.add("combat.reach");
+        }
+        for (String mob : sealedMobs) {
+            if (OperatorPolicy.present(specs,
+                    OperatorPolicy.COMBAT_REACH + "." + mob)) {
+                over.add("combat.reach." + mob);
+            }
+        }
+        String combatNote = over.isEmpty() ? ""
+                : " overridden <" + join(over) + ">";
         if (perMobWeakspots.size() == 1) {
             System.out.println("[MatouBridge] combat wired <"
                     + policy.combatWeakspots() + "> reach <"
@@ -667,9 +700,11 @@ public final class MatouBridgeMod {
      * clash, kept qualified for port symmetry).
      *
      * <p>Per-mob tranche (hub {@code decisions/VIRTUAL_HITBOXES.md}):
-     * the ray-test cutoff is the victim's per-mob effective reach from
-     * the wire-time map (content reach unless the operator
-     * {@code combat.reach} wins); the multiplier dispatches per mob
+      * the ray-test cutoff is the victim's per-mob effective reach from
+      * the wire-time map (content reach unless the operator
+      * {@code combat.reach} wins globally or
+      * {@code combat.reach.<mob>} wins for that mob); the multiplier
+      * dispatches per mob
      * through the victim's weakspot table. An unsealed mob refuses
      * loudly — never a defaulted reach. Passive without a wired pack
      * (same silent fallback as the unwired reach before).

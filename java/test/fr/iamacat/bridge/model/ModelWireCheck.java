@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,6 +52,7 @@ public final class ModelWireCheck {
         testTempRoundtrip();
         testRefusals();
         testCombatReachOverride();
+        testPerMobReachOverride();
         testPerMobCombat();
         System.out.println("ok model-wire-check : beast model wiring proven pure");
     }
@@ -155,12 +157,14 @@ public final class ModelWireCheck {
                 && owned.reach("my_brute") == 5.0,
                 "content reach is 4.0 beast 5.0 brute");
         double content = owned.reach("my_beast");
-        check(OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore"))) == 4.0,
+        List<String> mobs = Arrays.asList("my_beast", "my_brute");
+        check(OperatorPolicy.effectiveCombatReach(content, "my_beast",
+                mobs, specs(spec("example1:my_ore"))) == 4.0,
                 "operator absent means content reach");
-        check(OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore", "combat.reach", "5.0")))
-                == 5.0, "operator combat.reach wins over content");
+        check(OperatorPolicy.effectiveCombatReach(content, "my_beast",
+                mobs, specs(spec("example1:my_ore", "combat.reach",
+                        "5.0"))) == 5.0,
+                "operator combat.reach wins over content");
         check(!OperatorPolicy.present(
                 specs(spec("example1:my_ore")),
                 OperatorPolicy.COMBAT_REACH),
@@ -170,29 +174,133 @@ public final class ModelWireCheck {
                 OperatorPolicy.COMBAT_REACH),
                 "present reach key is present");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore", "combat.reach", "0"))),
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reach", "0"))),
                 "E_COMBAT_WIRE:bad");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore", "combat.reach", "-1"))),
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reach", "-1"))),
                 "E_COMBAT_WIRE:bad");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore", "combat.reach", "x"))),
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reach", "x"))),
                 "E_COMBAT_WIRE:bad");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore", "combat.reach", "NaN"))),
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reach", "NaN"))),
                 "E_COMBAT_WIRE:bad");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore", "combat.reach", "Infinity"))),
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reach", "Infinity"))),
                 "E_COMBAT_WIRE:bad");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore", "combat.reach", "5.0"),
+                "my_beast", mobs, specs(
+                        spec("example1:my_ore", "combat.reach", "5.0"),
                         spec("example1:my_ore", "combat.reach", "6.0"))),
                 "E_COMBAT_WIRE:multi");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
-                specs(spec("example1:my_ore", "combat.reah", "5.0"))),
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reah", "5.0"))),
                 "E_COMBAT_WIRE:unknown");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
-                null), "E_COMBAT_WIRE:null");
+                "my_beast", mobs, null), "E_COMBAT_WIRE:null");
+    }
+
+    /**
+     * Per-mob combat reach battery (per-mob tranche, hub
+     * decisions/VIRTUAL_HITBOXES.md): absent means content/global, the
+     * per-mob key wins for its mob only, a global-plus-per-mob pair
+     * resolves per mob, and every bad shape refuses loudly — the same
+     * rule the forge {@code wireCombat} consumes, exercised here
+     * through the shipped {@code OperatorPolicy}. Same shape as the
+     * global battery above, no new gate.
+     */
+    private static void testPerMobReachOverride() {
+        CombatTable owned = CombatTable.fromFile(
+                "../example1/content/owned.matou");
+        List<String> mobs = Arrays.asList("my_beast", "my_brute");
+        List<Packs.PackSpec> bare = specs(spec("example1:my_ore"));
+        check(OperatorPolicy.effectiveCombatReach(
+                owned.reach("my_beast"), "my_beast", mobs, bare) == 4.0
+                && OperatorPolicy.effectiveCombatReach(
+                        owned.reach("my_brute"), "my_brute", mobs, bare)
+                        == 5.0,
+                "per-mob absent means content reach per mob");
+        List<Packs.PackSpec> bruteOnly = specs(spec("example1:my_ore",
+                "combat.reach.my_brute", "6.0"));
+        check(OperatorPolicy.effectiveCombatReach(
+                owned.reach("my_beast"), "my_beast", mobs, bruteOnly)
+                        == 4.0
+                && OperatorPolicy.effectiveCombatReach(
+                        owned.reach("my_brute"), "my_brute", mobs,
+                        bruteOnly) == 6.0,
+                "per-mob combat.reach wins for its mob only");
+        check(OperatorPolicy.present(bruteOnly,
+                "combat.reach.my_brute"),
+                "present per-mob reach key is present");
+        check(!OperatorPolicy.present(bruteOnly,
+                "combat.reach.my_beast"),
+                "absent per-mob reach key is not present");
+        List<Packs.PackSpec> agreed = specs(
+                spec("example1:my_ore", "combat.reach.my_brute", "6.0"),
+                spec("example1:my_ore", "combat.reach.my_brute", "6.0"));
+        check(OperatorPolicy.effectiveCombatReach(
+                owned.reach("my_brute"), "my_brute", mobs, agreed)
+                        == 6.0,
+                "agreed per-mob reach wins");
+        List<Packs.PackSpec> both = specs(spec("example1:my_ore",
+                "combat.reach", "5.0", "combat.reach.my_brute", "6.0"));
+        check(OperatorPolicy.effectiveCombatReach(
+                owned.reach("my_beast"), "my_beast", mobs, both) == 5.0
+                && OperatorPolicy.effectiveCombatReach(
+                        owned.reach("my_brute"), "my_brute", mobs, both)
+                        == 6.0,
+                "per-mob reach beats the global reach for its mob only");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_brute", mobs, specs(spec("example1:my_ore",
+                        "combat.reach.my_brute", "0"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_brute", mobs, specs(spec("example1:my_ore",
+                        "combat.reach.my_brute", "-1"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_brute", mobs, specs(spec("example1:my_ore",
+                        "combat.reach.my_brute", "x"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_brute", mobs, specs(spec("example1:my_ore",
+                        "combat.reach.my_brute", "NaN"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_brute", mobs, specs(
+                        spec("example1:my_ore",
+                                "combat.reach.my_brute", "6.0"),
+                        spec("example1:my_ore",
+                                "combat.reach.my_brute", "7.0"))),
+                "E_COMBAT_WIRE:multi");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reah.my_beast", "5.0"))),
+                "E_COMBAT_WIRE:unknown");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reach.nope", "5.0"))),
+                "E_COMBAT_WIRE:unknown");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reach.", "5.0"))),
+                "E_COMBAT_WIRE:unknown");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_beast", mobs, specs(spec("example1:my_ore",
+                        "combat.reach.my_beast.x", "5.0"))),
+                "E_COMBAT_WIRE:unknown");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0, null,
+                mobs, bare), "E_COMBAT_WIRE:null");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "my_beast", null, bare), "E_COMBAT_WIRE:null");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(4.0,
+                "nope", mobs, bare), "E_COMBAT_WIRE:unknown");
     }
 
     /**

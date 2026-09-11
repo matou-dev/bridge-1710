@@ -2,15 +2,16 @@ package fr.iamacat.bridge.wire;
 
 import fr.iamacat.bridge.Packs.PackSpec;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
 /**
  * T2 operator overrides (hub decisions/SPAWN.md operator-override
- * tranche, extended by the combat reach-override tranche in hub
- * decisions/VIRTUAL_HITBOXES.md): the operator tunes content-decided
- * spawn/loot/combat policy from {@code packs.cfg} without touching
- * {@code owned.matou}.
+ * tranche, extended by the combat reach-override tranche and the
+ * per-mob override tranche in hub decisions/VIRTUAL_HITBOXES.md): the
+ * operator tunes content-decided spawn/loot/combat policy from
+ * {@code packs.cfg} without touching {@code owned.matou}.
  *
  * <p>Placement: this package is the shared base below the
  * {@code spawn}/{@code loot}/{@code combat} leaves (all import down,
@@ -34,14 +35,23 @@ import java.util.List;
  *   (positive finite f64, default content reach). Weakspot multipliers
  *   stay content-only (damage balance, same split as {@code spawnHp} —
  *   no operator key, never a quiet knob).</li>
+ *   <li>{@code spawn.cap.<mob>} / {@code spawn.budget.<mob>} /
+ *   {@code spawn.y_min.<mob>} / {@code spawn.y_max.<mob>} /
+ *   {@code combat.reach.<mob>} — per-mob wins (same value shapes as
+ *   their global key, short mob names with the sealed-maps spelling).
+ *   {@code loot.count} stays global (damage/count balance, same split
+ *   as the content-only weakspot multipliers — no per-mob count knob,
+ *   never a quiet one).</li>
  * </ul>
  *
- * <p>Precedence: operator present wins, else content. Unknown
- * {@code spawn.*}/{@code loot.*}/{@code combat.*} keys refuse loudly (a
- * typo is never a silent default); other namespaces ({@code ownedFile},
- * {@code block.}, {@code veinblock.}, ...) are not this file's business.
- * Several wire lines carrying the same key with different values refuse
- * loudly (silent picks are defaults).
+ * <p>Precedence per mob: the per-mob key wins, else the global key,
+ * else content. Unknown {@code spawn.*}/{@code loot.*}/
+ * {@code combat.*} keys refuse loudly (a typo is never a silent
+ * default — that covers bad bases with or without a suffix as well as
+ * well-formed per-mob keys naming an unsealed mob); other namespaces
+ * ({@code ownedFile}, {@code block.}, {@code veinblock.}, ...) are not
+ * this file's business. Several wire lines carrying the same key with
+ * different values refuse loudly (silent picks are defaults).
  *
  * <p>Loot scope rides no key: the ore is the operator wire-block column
  * ({@link #wireBlocks}), one entry per distinct wire block in line
@@ -70,27 +80,59 @@ public final class OperatorPolicy {
     private OperatorPolicy() {}
 
     /**
-     * Effective spawn policy: content values with operator wins applied.
+     * Effective spawn policy for one mob: content values with operator
+     * wins applied (per-mob tranche, hub
+     * decisions/VIRTUAL_HITBOXES.md — the per-mob key wins, else the
+     * global key, else content).
      *
+     * @param mob short mob name (the sealed-maps spelling).
+     * @param mobs sealed short mob names (every per-mob suffix across
+     *        the specs must name one — a typo'd mob is never a silent
+     *        content fallback).
      * @return {@code long[]{cap, budget, yMin, yMax}}, all validated.
-     * @throws NullPointerException when specs is null.
-     * @throws IllegalArgumentException on bad/multi/unknown operator
-     *         values or a merged unordered band — never defaulted.
+     * @throws NullPointerException when mob, mobs or specs is null.
+     * @throws IllegalArgumentException on an unsealed mob, on
+     *         bad/multi/unknown operator values or a merged unordered
+     *         band — never defaulted.
      */
     public static long[] effectiveSpawn(long cap, long budget, long yMin,
-            long yMax, List<PackSpec> specs) {
+            long yMax, String mob, Collection<String> mobs,
+            List<PackSpec> specs) {
+        if (mob == null) {
+            throw new NullPointerException("E_SPAWN_WIRE:null mob");
+        }
+        if (mobs == null) {
+            throw new NullPointerException("E_SPAWN_WIRE:null mobs");
+        }
         if (specs == null) {
             throw new NullPointerException("E_SPAWN_WIRE:null specs");
         }
-        rejectUnknownSpawn(specs);
-        Long oCap = positive(specs, SPAWN_CAP, "E_SPAWN_WIRE");
-        Long oBudget = positive(specs, SPAWN_BUDGET, "E_SPAWN_WIRE");
-        Long oYMin = nonNegative(specs, SPAWN_Y_MIN, "E_SPAWN_WIRE");
-        Long oYMax = nonNegative(specs, SPAWN_Y_MAX, "E_SPAWN_WIRE");
-        long eCap = oCap != null ? oCap.longValue() : cap;
-        long eBudget = oBudget != null ? oBudget.longValue() : budget;
-        long eYMin = oYMin != null ? oYMin.longValue() : yMin;
-        long eYMax = oYMax != null ? oYMax.longValue() : yMax;
+        if (!mobs.contains(mob)) {
+            throw new IllegalArgumentException("E_SPAWN_WIRE:unknown mob <"
+                    + mob + "> (want one of " + mobs
+                    + " — sealed mobs only, never defaulted)");
+        }
+        rejectUnknownSpawn(specs, mobs);
+        Long gCap = positive(specs, SPAWN_CAP, "E_SPAWN_WIRE");
+        Long gBudget = positive(specs, SPAWN_BUDGET, "E_SPAWN_WIRE");
+        Long gYMin = nonNegative(specs, SPAWN_Y_MIN, "E_SPAWN_WIRE");
+        Long gYMax = nonNegative(specs, SPAWN_Y_MAX, "E_SPAWN_WIRE");
+        Long mCap = positive(specs, SPAWN_CAP + "." + mob,
+                "E_SPAWN_WIRE");
+        Long mBudget = positive(specs, SPAWN_BUDGET + "." + mob,
+                "E_SPAWN_WIRE");
+        Long mYMin = nonNegative(specs, SPAWN_Y_MIN + "." + mob,
+                "E_SPAWN_WIRE");
+        Long mYMax = nonNegative(specs, SPAWN_Y_MAX + "." + mob,
+                "E_SPAWN_WIRE");
+        long eCap = mCap != null ? mCap.longValue()
+                : gCap != null ? gCap.longValue() : cap;
+        long eBudget = mBudget != null ? mBudget.longValue()
+                : gBudget != null ? gBudget.longValue() : budget;
+        long eYMin = mYMin != null ? mYMin.longValue()
+                : gYMin != null ? gYMin.longValue() : yMin;
+        long eYMax = mYMax != null ? mYMax.longValue()
+                : gYMax != null ? gYMax.longValue() : yMax;
         if (eCap <= 0) {
             throw new IllegalArgumentException("E_SPAWN_WIRE:range <cap="
                     + eCap + "> (want > 0, content or override)");
@@ -131,23 +173,43 @@ public final class OperatorPolicy {
     }
 
     /**
-     * Effective combat reach: content reach with the operator win
-     * applied (hub decisions/VIRTUAL_HITBOXES.md reach-override
-     * tranche — the weakspot table itself stays content-only).
+     * Effective combat reach for one mob: content reach with the
+     * operator win applied (hub decisions/VIRTUAL_HITBOXES.md
+     * reach-override tranche for the global key, per-mob tranche for
+     * the suffixed key — the weakspot table itself stays
+     * content-only).
      *
-     * @throws NullPointerException when specs is null.
-     * @throws IllegalArgumentException on bad/multi/unknown operator
-     *         values or a non-positive non-finite merge — never
-     *         defaulted.
+     * @param mob short mob name (the sealed-maps spelling).
+     * @param mobs sealed short mob names (every per-mob suffix across
+     *        the specs must name one — a typo'd mob is never a silent
+     *        content fallback).
+     * @throws NullPointerException when mob, mobs or specs is null.
+     * @throws IllegalArgumentException on an unsealed mob, on
+     *         bad/multi/unknown operator values or a non-positive
+     *         non-finite merge — never defaulted.
      */
-    public static double effectiveCombatReach(double reach,
-            List<PackSpec> specs) {
+    public static double effectiveCombatReach(double reach, String mob,
+            Collection<String> mobs, List<PackSpec> specs) {
+        if (mob == null) {
+            throw new NullPointerException("E_COMBAT_WIRE:null mob");
+        }
+        if (mobs == null) {
+            throw new NullPointerException("E_COMBAT_WIRE:null mobs");
+        }
         if (specs == null) {
             throw new NullPointerException("E_COMBAT_WIRE:null specs");
         }
-        rejectUnknownCombat(specs);
-        Double o = positiveFinite(specs, COMBAT_REACH, "E_COMBAT_WIRE");
-        double e = o != null ? o.doubleValue() : reach;
+        if (!mobs.contains(mob)) {
+            throw new IllegalArgumentException(
+                    "E_COMBAT_WIRE:unknown mob <" + mob + "> (want one of "
+                            + mobs + " — sealed mobs only, never defaulted)");
+        }
+        rejectUnknownCombat(specs, mobs);
+        Double g = positiveFinite(specs, COMBAT_REACH, "E_COMBAT_WIRE");
+        Double m = positiveFinite(specs, COMBAT_REACH + "." + mob,
+                "E_COMBAT_WIRE");
+        double e = m != null ? m.doubleValue()
+                : g != null ? g.doubleValue() : reach;
         if (!(e > 0.0) || Double.isNaN(e) || Double.isInfinite(e)) {
             throw new IllegalArgumentException("E_COMBAT_WIRE:range <reach="
                     + e + "> (want positive finite f64, content or override)");
@@ -290,25 +352,50 @@ public final class OperatorPolicy {
         }
     }
 
-    /** Unknown {@code spawn.*} keys refuse (typos never vanish). */
-    private static void rejectUnknownSpawn(List<PackSpec> specs) {
+    /** Unknown {@code spawn.*} keys refuse (typos never vanish —
+     * global or {@code .<mob>}-suffixed known bases only, and every
+     * suffix names a sealed mob). */
+    private static void rejectUnknownSpawn(List<PackSpec> specs,
+            Collection<String> mobs) {
         for (PackSpec spec : specs) {
             if (spec == null) {
                 throw new NullPointerException("E_SPAWN_WIRE:null spec");
             }
             for (String key : spec.args.keySet()) {
                 if (key != null && key.startsWith("spawn.")
-                        && !key.equals(SPAWN_CAP)
-                        && !key.equals(SPAWN_BUDGET)
-                        && !key.equals(SPAWN_Y_MIN)
-                        && !key.equals(SPAWN_Y_MAX)) {
+                        && !knownSpawnKey(key, mobs)) {
                     throw new IllegalArgumentException(
                             "E_SPAWN_WIRE:unknown <" + key + "> (want "
                                     + "spawn.cap/spawn.budget/spawn.y_min/"
-                                    + "spawn.y_max, never silent typos)");
+                                    + "spawn.y_max plus .<mob> per-mob keys "
+                                    + "over " + mobs
+                                    + ", never silent typos)");
                 }
             }
         }
+    }
+
+    /**
+     * True for the global spawn keys plus well-formed per-mob keys over
+     * sealed mobs ({@code spawn.<base>.<mob>}, one dot, non-empty
+     * suffix).
+     */
+    private static boolean knownSpawnKey(String key,
+            Collection<String> mobs) {
+        if (key.equals(SPAWN_CAP) || key.equals(SPAWN_BUDGET)
+                || key.equals(SPAWN_Y_MIN) || key.equals(SPAWN_Y_MAX)) {
+            return true;
+        }
+        String[] bases = {SPAWN_CAP, SPAWN_BUDGET, SPAWN_Y_MIN,
+            SPAWN_Y_MAX};
+        for (String base : bases) {
+            if (key.startsWith(base + ".")) {
+                String suffix = key.substring(base.length() + 1);
+                return !suffix.isEmpty() && suffix.indexOf('.') < 0
+                        && mobs.contains(suffix);
+            }
+        }
+        return false;
     }
 
     /** Unknown {@code loot.*} keys refuse (typos never vanish). */
@@ -328,20 +415,43 @@ public final class OperatorPolicy {
         }
     }
 
-    /** Unknown {@code combat.*} keys refuse (typos never vanish). */
-    private static void rejectUnknownCombat(List<PackSpec> specs) {
+    /** Unknown {@code combat.*} keys refuse (typos never vanish —
+     * the global key or a {@code .<mob>}-suffixed key over sealed
+     * mobs only). */
+    private static void rejectUnknownCombat(List<PackSpec> specs,
+            Collection<String> mobs) {
         for (PackSpec spec : specs) {
             if (spec == null) {
                 throw new NullPointerException("E_COMBAT_WIRE:null spec");
             }
             for (String key : spec.args.keySet()) {
                 if (key != null && key.startsWith("combat.")
-                        && !key.equals(COMBAT_REACH)) {
+                        && !knownCombatKey(key, mobs)) {
                     throw new IllegalArgumentException(
                             "E_COMBAT_WIRE:unknown <" + key + "> (want "
-                                    + "combat.reach, never silent typos)");
+                                    + "combat.reach plus .<mob> per-mob keys "
+                                    + "over " + mobs
+                                    + ", never silent typos)");
                 }
             }
         }
+    }
+
+    /**
+     * True for the global combat key plus well-formed per-mob keys over
+     * sealed mobs ({@code combat.reach.<mob>}, one dot, non-empty
+     * suffix).
+     */
+    private static boolean knownCombatKey(String key,
+            Collection<String> mobs) {
+        if (key.equals(COMBAT_REACH)) {
+            return true;
+        }
+        if (key.startsWith(COMBAT_REACH + ".")) {
+            String suffix = key.substring(COMBAT_REACH.length() + 1);
+            return !suffix.isEmpty() && suffix.indexOf('.') < 0
+                    && mobs.contains(suffix);
+        }
+        return false;
     }
 }
