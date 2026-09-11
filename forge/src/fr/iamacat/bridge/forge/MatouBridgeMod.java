@@ -400,9 +400,10 @@ public final class MatouBridgeMod {
       * the effective policy. No owned file anywhere means spawn stays
       * passive (Q1 cohabitation): the hooks gate on the empty mob map.
       *
-      * <p>Per-mob tranche (hub {@code decisions/VIRTUAL_HITBOXES.md}):
+      * <p>Qualified-view tranche (hub {@code decisions/SPAWN.md}):
       * shorts from {@code PolicyPack.spawnMobs()} qualify into cell refs
-      * through {@link #contentNamespace} (same-file namespace rule).
+      * through {@code PolicyPack.spawnMobRef} (pack-owned namespace —
+      * no loot-to-spawn read).
       */
     private void wireSpawn(List<Packs.PackSpec> specs) {
         if (ownedPath == null) {
@@ -411,7 +412,6 @@ public final class MatouBridgeMod {
         spawnVocab = vocabulary(SpawnStates.SCOPE, "E_SPAWN_SEAL");
         PolicyPack policy = policy("E_SPAWN_POLICY");
         spawn = policy.spawnJob();
-        String ns = contentNamespace();
         List<String> sealedShorts = new ArrayList<String>(
                 policy.spawnMobs());
         for (String shortMob : sealedShorts) {
@@ -421,7 +421,7 @@ public final class MatouBridgeMod {
                     policy.spawnYMin(shortMob),
                     policy.spawnYMax(shortMob), shortMob, sealedShorts,
                     specs);
-            String qualified = ns + ":" + shortMob;
+            String qualified = policy.spawnMobRef(shortMob);
             if (spawnMob == null) {
                 spawnMob = qualified;
             }
@@ -1056,38 +1056,7 @@ public final class MatouBridgeMod {
     }
 
     /**
-      * Content namespace for mob refs, read off the wired loot drop refs:
-      * the parser enforces one {@code namespace} per owned file and the
-      * spawn wire shares the loot wire's file (one table per bridge), so
-      * the drop refs carry the mobs' namespace. Loud when the loot wire
-      * never ran or a drop ref is bare — a guessed namespace would be a
-      * silent default. (A qualified spawn-table view through
-      * {@code PolicyPack} would remove this loot-to-spawn read — named
-      * follow-up, zero behaviour difference.)
-      */
-    private String contentNamespace() {
-        if (lootTable == null || lootTable.isEmpty()) {
-            throw new IllegalStateException("E_SPAWN_MOB:nowire (want "
-                    + "the loot table wired — one owned file funds both "
-                    + "tables)");
-        }
-        String drop = lootTable.values().iterator().next();
-        if (drop == null) {
-            throw new IllegalStateException("E_SPAWN_MOB:null drop "
-                    + "(want a \"ns:item\" drop ref to read the file "
-                    + "namespace from)");
-        }
-        int colon = drop.indexOf(':');
-        if (colon <= 0) {
-            throw new IllegalArgumentException("E_SPAWN_MOB:type <"
-                    + drop + "> (want a \"ns:item\" drop ref to read "
-                    + "the file namespace from)");
-        }
-        return drop.substring(0, colon);
-    }
-
-    /**
-      * Census-cell mob suffix (the qualified ref past the first colon —
+     * Census-cell mob suffix (the qualified ref past the first colon —
       * same cut as the job's census rule); a colon-less cell matches no
       * sealed mob.
       */
