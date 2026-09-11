@@ -8,6 +8,7 @@ import fr.iamacat.spi.model.MatouModel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -68,7 +69,13 @@ public final class ModelWireCheck {
         RayHit hit = HitTester.test(at,
                 new Vec3d(10.0, 64.5, 2.0), new Vec3d(0.0, 0.0, -1.0), 10.0);
         check(hit != null && hit.boneName.equals("body"), "pure ray resolves body");
-        check(BeastModel.WEAKSPOTS.get("head").floatValue() == 2.0F,
+        // Proof seal (mirrors content/owned.matou — the live seal happens
+        // at wireCombat, never here): the holder transports, it never
+        // owns a multiplier.
+        BeastModel.sealWeakspots(Collections.singletonMap("head",
+                Float.valueOf(2.0F)));
+        check(BeastModel.combatWeakspots().get("head").floatValue()
+                        == 2.0F,
                 "head weakspot 2x");
     }
 

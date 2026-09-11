@@ -10,6 +10,7 @@ import cpw.mods.fml.relauncher.Side;
 import fr.iamacat.bridge.ForgeCells;
 import fr.iamacat.bridge.ForgeSnapshot;
 import fr.iamacat.bridge.Packs;
+import fr.iamacat.bridge.model.BeastModel;
 import fr.iamacat.bridge.wire.OperatorPolicy;
 import fr.iamacat.bridge.spike.MinedStore;
 import fr.iamacat.bridge.spike.RepopJob;
@@ -135,12 +136,6 @@ public final class MatouBridgeMod {
     /** Spike scope: vanilla stone only. Other breaks are not the spike's
      * business (metadata/T.E. restore is an explicit non-goal). */
     static final String REPOP_BLOCK = "minecraft:stone";
-    /** Combat reach (hub decisions/VIRTUAL_HITBOXES.md, server weakspot
-     * hook — same derivation as the 1122 lead): eye-to-hitVec cutoff,
-     * vanilla ~3.0 eye-to-origin plus one block of bone extent past the
-     * origin. A constant, never a default: attribute-driven reach is a
-     * named re-opener. */
-    static final double COMBAT_REACH = 4.0d;
     /** Loot scope: the operator wire blocks, resolved at wire time (T2
      * operator-override tranche, hub decisions/SPAWN.md — the packs.cfg
      * wire-block column names the ore, no bridge constant does; other
@@ -163,6 +158,11 @@ public final class MatouBridgeMod {
     private long spawnBudget;
     private long spawnYMin;
     private long spawnYMax;
+    /** Combat reach, sealed from the content table at wire time (hub
+     * decisions/VIRTUAL_HITBOXES.md combat-policy tranche): effective
+     * eye-to-hitVec cutoff for the bone ray-test. The bridge transports
+     * it into the seal, it never owns a combat number. */
+    private double combatReach;
     /** Loot policy, sealed from the content table at wire time unless
      * the operator {@code loot.count} wins (operator-override tranche):
      * effective items per harvest. Transported, never owned. */
@@ -212,6 +212,7 @@ public final class MatouBridgeMod {
         }
         wireLoot(specs);
         wireSpawn(specs);
+        wireCombat(specs);
     }
 
     /**
@@ -256,7 +257,7 @@ public final class MatouBridgeMod {
         if (!(pack instanceof PolicyPack)) {
             throw new IllegalArgumentException(code + ":nopolicy <"
                     + pack.getClass().getName() + "> (pack serves no "
-                    + "loot/spawn policy)");
+                    + "loot/spawn/combat policy)");
         }
         return (PolicyPack) pack;
     }
@@ -374,6 +375,27 @@ public final class MatouBridgeMod {
                 + "> hp <" + spawnHp + "> cap <" + spawnCap
                 + "> budget <" + spawnBudget + "> y <" + spawnYMin
                 + ".." + spawnYMax + ">" + spawnNote);
+    }
+
+    /**
+     * Combat wiring: the weakspot table plus the reach attribute from
+     * the first wire's pack policy (parsed once at pack wire time, like
+     * loot/spawn — never on the tick path). The table seals into the
+     * bridge model holder the beast reads at hit time; the reach lands
+     * on the hook's ray-test cutoff. No owned file anywhere means
+     * combat stays passive (Q1 cohabitation): the seal stays empty and
+     * any hit-time read refuses loudly instead of defaulting 1.0x.
+     */
+    private void wireCombat(List<Packs.PackSpec> specs) {
+        if (ownedPath == null) {
+            return;
+        }
+        PolicyPack policy = policy("E_COMBAT_POLICY");
+        BeastModel.sealWeakspots(policy.combatWeakspots());
+        combatReach = policy.combatReach();
+        System.out.println("[MatouBridge] combat wired <"
+                + policy.combatWeakspots() + "> reach <" + combatReach
+                + ">");
     }
 
     /** Comma join for the override log suffix (Java 8, no extra dep). */    private static String join(List<String> parts) {
@@ -552,7 +574,7 @@ public final class MatouBridgeMod {
         fr.iamacat.spi.hit.Vec3d dir = new fr.iamacat.spi.hit.Vec3d(
                 look.xCoord, look.yCoord, look.zCoord);
         RayHit hit = HitTester.test((MatouEntity) body, origin, dir,
-                COMBAT_REACH);
+                combatReach);
         if (hit == null) {
             return;
         }

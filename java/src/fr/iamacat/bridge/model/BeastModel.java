@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -28,13 +29,44 @@ public final class BeastModel {
     public static final String GEO_PATH = "config/matoubridge/my_beast.geo.json";
 
     /**
-     * Beast-local weakspot table until content-driven weakspots land: the
+     * Sealed combat weakspot table (hub
+     * {@code decisions/VIRTUAL_HITBOXES.md}, combat-policy tranche):
+     * the content table transported at wire time
+     * ({@code MatouBridgeMod.wireCombat}), never a bridge constant. The
      * shipped asset always carries a {@code head} bone (tripwired by
-     * {@code ModelWireCheck}), struck at 2x. Never a silent default — a
-     * renamed bone refuses at load, not at hit time.
+     * {@code ModelWireCheck}), struck at the sealed multiplier. A read
+     * before the seal refuses loudly — an unsealed default would be
+     * silent combat behaviour.
      */
-    public static final Map<String, Float> WEAKSPOTS =
-            Collections.singletonMap("head", Float.valueOf(2.0F));
+    private static volatile Map<String, Float> sealedWeakspots;
+
+    /**
+     * Seals the content weakspot table once at wire time (parse-once,
+     * beside the tables — never on the tick path). Loud on null/empty.
+     */
+    public static void sealWeakspots(Map<String, Float> weakspots) {
+        if (weakspots == null) {
+            throw new NullPointerException("E_COMBAT_POLICY:null "
+                    + "weakspots (want the sealed content table)");
+        }
+        if (weakspots.isEmpty()) {
+            throw new IllegalArgumentException("E_COMBAT_POLICY:empty "
+                    + "weakspots (a table nobody pays would be a "
+                    + "silent no-op)");
+        }
+        sealedWeakspots = Collections.unmodifiableMap(
+                new LinkedHashMap<String, Float>(weakspots));
+    }
+
+    /** Sealed weakspot table, or the loud unwired refusal (never 1.0x). */
+    public static Map<String, Float> combatWeakspots() {
+        Map<String, Float> hit = sealedWeakspots;
+        if (hit == null) {
+            throw new IllegalStateException("E_COMBAT_POLICY:unwired "
+                    + "(weakspot table never sealed — want wireCombat)");
+        }
+        return hit;
+    }
 
     private static volatile BeastModel cached;
 

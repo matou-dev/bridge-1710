@@ -59,6 +59,6 @@ public final class MatouEntity extends EntityPig implements Hittable {
 
     @Override
     public Map<String, Float> hitWeakspots() {
-        return BeastModel.WEAKSPOTS;
+        return BeastModel.combatWeakspots();
     }
 }
