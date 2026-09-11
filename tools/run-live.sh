@@ -145,6 +145,25 @@ pin_method "net/minecraft/util/DamageSource/getEntity" "()Lnet/minecraft/entity/
 pin_field "net/minecraft/util/Vec3/xCoord"
 pin_field "net/minecraft/util/Vec3/yCoord"
 pin_field "net/minecraft/util/Vec3/zCoord"
+# Second-beast tranche (hub decisions/VIRTUAL_HITBOXES.md, per-mob NBT
+# identity — ported from the 1122 lead): the Pig-declared persist helpers
+# plus the string-tag surface. 1614-native notes (measured via javap +
+# notch-srg.srg against the pinned bytes, never ported blind from 1122):
+# EntityPig declares BOTH helpers PUBLIC (notch wo: public b(dh) is
+# writeEntityToNBT func_70014_b, public a(dh) is readEntityFromNBT
+# func_70037_a — the protected abstract pair lives one level up on
+# Entity, so the beast overrides at the Pig level whose super calls emit
+# the directly mappable EntityPig owner, same owner discipline as the
+# lead) and NBTTagCompound carries hasKey func_74764_b (notch dh/c),
+# getString func_74779_i (notch dh/j) and setString func_74778_a
+# (notch dh/a). Full-map era: no narrow-map file exists on 1710 (these
+# pins ARE the map — a stub the SRG does not know fails loudly above,
+# never a silent default).
+pin_method "net/minecraft/entity/passive/EntityPig/writeEntityToNBT" "(Lnet/minecraft/nbt/NBTTagCompound;)V"
+pin_method "net/minecraft/entity/passive/EntityPig/readEntityFromNBT" "(Lnet/minecraft/nbt/NBTTagCompound;)V"
+pin_method "net/minecraft/nbt/NBTTagCompound/hasKey" "(Ljava/lang/String;)Z"
+pin_method "net/minecraft/nbt/NBTTagCompound/getString" "(Ljava/lang/String;)Ljava/lang/String;"
+pin_method "net/minecraft/nbt/NBTTagCompound/setString" "(Ljava/lang/String;Ljava/lang/String;)V"
 echo "ok b3-live : stubs pinned to SRG"
 
 # 2. Provision the 1614 server once (idempotent, checksum-verified).

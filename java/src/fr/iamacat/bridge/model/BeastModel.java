@@ -8,8 +8,10 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Bridge-side holder of the generic beast shape (hub
@@ -29,43 +31,181 @@ public final class BeastModel {
     public static final String GEO_PATH = "config/matoubridge/my_beast.geo.json";
 
     /**
-     * Sealed combat weakspot table (hub
+     * Sealed per-mob combat tables (hub
      * {@code decisions/VIRTUAL_HITBOXES.md}, combat-policy tranche):
-     * the content table transported at wire time
-     * ({@code MatouBridgeMod.wireCombat}), never a bridge constant. The
-     * shipped asset always carries a {@code head} bone (tripwired by
+     * the content tables transported at wire time
+     * ({@code MatouBridgeMod.wireCombat}), never bridge constants. Mob
+     * to bone-to-multiplier, plus mob to reach. The shipped asset
+     * always carries a {@code head} bone (tripwired by
      * {@code ModelWireCheck}), struck at the sealed multiplier. A read
      * before the seal refuses loudly — an unsealed default would be
      * silent combat behaviour.
      */
-    private static volatile Map<String, Float> sealedWeakspots;
+    private static volatile Map<String, Map<String, Float>> sealedCombat;
+
+    /** Sealed per-mob reach attributes (same seal as {@link #sealedCombat}). */
+    private static volatile Map<String, Double> sealedReach;
 
     /**
-     * Seals the content weakspot table once at wire time (parse-once,
-     * beside the tables — never on the tick path). Loud on null/empty.
+     * Seals the content combat tables once at wire time (parse-once,
+     * beside the tables — never on the tick path). Loud on null/empty
+     * maps, a mob funding no weakspot (or vice versa), or a missing or
+     * non-positive mult or reach.
      */
-    public static void sealWeakspots(Map<String, Float> weakspots) {
-        if (weakspots == null) {
+    public static void sealCombat(
+            Map<String, Map<String, Float>> perMobWeakspots,
+            Map<String, Double> perMobReach) {
+        if (perMobWeakspots == null) {
             throw new NullPointerException("E_COMBAT_POLICY:null "
-                    + "weakspots (want the sealed content table)");
+                    + "weakspots (want the sealed content tables)");
         }
-        if (weakspots.isEmpty()) {
+        if (perMobReach == null) {
+            throw new NullPointerException("E_COMBAT_POLICY:null "
+                    + "reach (want the sealed content reaches)");
+        }
+        if (perMobWeakspots.isEmpty()) {
             throw new IllegalArgumentException("E_COMBAT_POLICY:empty "
                     + "weakspots (a table nobody pays would be a "
                     + "silent no-op)");
         }
-        sealedWeakspots = Collections.unmodifiableMap(
-                new LinkedHashMap<String, Float>(weakspots));
+        if (perMobReach.isEmpty()) {
+            throw new IllegalArgumentException("E_COMBAT_POLICY:empty "
+                    + "reach (an unreached mob would be a silent "
+                    + "no-op)");
+        }
+        Map<String, Map<String, Float>> weak =
+                new LinkedHashMap<String, Map<String, Float>>();
+        for (Map.Entry<String, Map<String, Float>> e
+                : perMobWeakspots.entrySet()) {
+            String mob = e.getKey();
+            Map<String, Float> rows = e.getValue();
+            if (mob == null || mob.isEmpty()
+                    || rows == null || rows.isEmpty()
+                    || !perMobReach.containsKey(mob)) {
+                throw new IllegalArgumentException(
+                        "E_COMBAT_POLICY:lonely mob <" + mob + "> (every "
+                                + "mob funds a weakspot — an unfunded "
+                                + "mob would be a silent no-op)");
+            }
+            for (Map.Entry<String, Float> row : rows.entrySet()) {
+                Float mult = row.getValue();
+                if (mult == null || !Float.isFinite(mult.floatValue())
+                        || mult.floatValue() <= 0.0F) {
+                    throw new IllegalArgumentException(
+                            "E_COMBAT_POLICY:bad mult <" + mob + "/"
+                                    + row.getKey() + "> (positive f32, "
+                                    + "never defaulted)");
+                }
+            }
+            weak.put(mob, Collections.unmodifiableMap(
+                    new LinkedHashMap<String, Float>(rows)));
+        }
+        Map<String, Double> reach =
+                new LinkedHashMap<String, Double>();
+        for (Map.Entry<String, Double> e : perMobReach.entrySet()) {
+            String mob = e.getKey();
+            Double at = e.getValue();
+            if (!weak.containsKey(mob)) {
+                throw new IllegalArgumentException(
+                        "E_COMBAT_POLICY:lonely mob <" + mob + "> "
+                                + "(every reach funds a weakspot — an "
+                                + "unfunded mob would be a silent "
+                                + "no-op)");
+            }
+            if (at == null || Double.isNaN(at.doubleValue())
+                    || Double.isInfinite(at.doubleValue())
+                    || at.doubleValue() <= 0.0d) {
+                throw new IllegalArgumentException(
+                        "E_COMBAT_POLICY:bad reach <" + mob + "> "
+                                + "(positive finite f64, never "
+                                + "defaulted)");
+            }
+            reach.put(mob, at);
+        }
+        sealedReach = Collections.unmodifiableMap(reach);
+        sealedCombat = Collections.unmodifiableMap(weak);
     }
 
-    /** Sealed weakspot table, or the loud unwired refusal (never 1.0x). */
-    public static Map<String, Float> combatWeakspots() {
-        Map<String, Float> hit = sealedWeakspots;
+    /**
+     * Short instance names of every sealed mob, in seal order
+     * (unmodifiable, never empty), or the loud unwired refusal.
+     */
+    public static Set<String> combatMobs() {
+        Map<String, Map<String, Float>> hit = sealedCombat;
         if (hit == null) {
             throw new IllegalStateException("E_COMBAT_POLICY:unwired "
-                    + "(weakspot table never sealed — want wireCombat)");
+                    + "(combat tables never sealed — want wireCombat)");
         }
-        return hit;
+        return Collections.unmodifiableSet(
+                new LinkedHashSet<String>(hit.keySet()));
+    }
+
+    /**
+     * Sealed weakspot table for one mob, or the loud unwired /
+     * null / unknown refusal (never 1.0x).
+     */
+    public static Map<String, Float> combatWeakspots(String mob) {
+        if (mob == null) {
+            throw new NullPointerException("E_COMBAT_POLICY:null mob "
+                    + "(want a sealed mob — see combatMobs)");
+        }
+        Map<String, Map<String, Float>> hit = sealedCombat;
+        if (hit == null) {
+            throw new IllegalStateException("E_COMBAT_POLICY:unwired "
+                    + "(combat tables never sealed — want wireCombat)");
+        }
+        Map<String, Float> rows = hit.get(mob);
+        if (rows == null) {
+            throw new IllegalArgumentException(
+                    "E_COMBAT_POLICY:unknown mob <" + mob + "> (want one "
+                            + "of " + hit.keySet() + " — never "
+                            + "defaulted)");
+        }
+        return rows;
+    }
+
+    /**
+     * Sealed reach attribute for one mob, or the loud unwired /
+     * null / unknown refusal (never defaulted).
+     */
+    public static double combatReach(String mob) {
+        if (mob == null) {
+            throw new NullPointerException("E_COMBAT_POLICY:null mob "
+                    + "(want a sealed mob — see combatMobs)");
+        }
+        Map<String, Double> hit = sealedReach;
+        if (hit == null || sealedCombat == null) {
+            throw new IllegalStateException("E_COMBAT_POLICY:unwired "
+                    + "(combat tables never sealed — want wireCombat)");
+        }
+        Double at = hit.get(mob);
+        if (at == null) {
+            throw new IllegalArgumentException(
+                    "E_COMBAT_POLICY:unknown mob <" + mob + "> (want one "
+                            + "of " + hit.keySet() + " — never "
+                            + "defaulted)");
+        }
+        return at.doubleValue();
+    }
+
+    /**
+     * Sealed weakspot table, or the loud unwired refusal (never 1.0x).
+     * Sole-mob view: refuses unless exactly one mob is sealed (use
+     * {@link #combatWeakspots(String)} per mob).
+     */
+    public static Map<String, Float> combatWeakspots() {
+        Map<String, Map<String, Float>> hit = sealedCombat;
+        if (hit == null) {
+            throw new IllegalStateException("E_COMBAT_POLICY:unwired "
+                    + "(combat tables never sealed — want wireCombat)");
+        }
+        if (hit.size() != 1) {
+            throw new IllegalArgumentException(
+                    "E_COMBAT_POLICY:multi sole-view <" + hit.keySet()
+                            + "> (the legacy view serves one mob — use "
+                            + "combatWeakspots(mob))");
+        }
+        return hit.values().iterator().next();
     }
 
     private static volatile BeastModel cached;

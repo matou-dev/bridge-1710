@@ -35,6 +35,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -94,13 +95,15 @@ import net.minecraftforge.event.world.BlockEvent;
  *
  * <p>Spawn (event-sourced, hub decisions/SPAWN.md): the pure
  * pack-served spawn job reads the bridge-owned {@link SpawnStore} census plus
- * the wired spawn table beside the first wire's pack states
+ * the wired per-mob spawn tables beside the first wire's pack states
  * (the pack-served spawn vocabulary, T3 registry — hub
- * {@code decisions/SPI_STATE_VOCABULARY.md}) and decides budgeted spawns; due
- * spawns land as the registered custom beast ({@link MatouEntity}, pig
- * shape and renderer reused — registration-path tranche, hub
- * decisions/REGISTRATION.md). A live {@code slots != due} divergence
- * fails the tick loudly ({@code E_SPAWN_SEAL:diverged},
+ * {@code decisions/SPI_STATE_VOCABULARY.md}) and decides budgeted spawns
+ * per mob; due spawns land as the registered custom beast
+ * ({@link MatouEntity}, pig shape and renderer reused — registration-path
+ * tranche, hub decisions/REGISTRATION.md), every beast carrying its own
+ * short mob identity (per-mob tranche, hub
+ * {@code decisions/VIRTUAL_HITBOXES.md}). A live {@code slots != due}
+ * divergence fails the tick loudly ({@code E_SPAWN_SEAL:diverged},
  * spike-tripwire shape). Census releases ride the kill hook below; an
  * {@code EntityJoinWorldEvent} veto holds the cap against beast joins
  * the budget never decided (vanilla pigs are a different species now:
@@ -148,21 +151,38 @@ public final class MatouBridgeMod {
     /** Spawn switch (DEV proof opt-in): landing plus veto stay passive
      * unless {@code SPAWN=1}, so union and loot runs never see a beast. */
     static final boolean SPAWN = "1".equals(System.getenv("SPAWN"));
-    /** Spawn policy, sealed from the content table at wire time unless
-     * the operator {@code spawn.*} wins (hub decisions/SPAWN.md
+    /** Spawn policy, sealed per mob from the content table at wire time
+     * unless the operator {@code spawn.*} wins (hub decisions/SPAWN.md
      * operator-override tranche): effective cap, per-tick budget and y
-     * band. The bridge transports them into the seal, it never owns a
-     * spawn number. The companion mirrors the effective cap (see its
-     * SPAWN_CAP note). */
-    private long spawnCap;
-    private long spawnBudget;
-    private long spawnYMin;
-    private long spawnYMax;
-    /** Combat reach, sealed from the content table at wire time (hub
-     * decisions/VIRTUAL_HITBOXES.md combat-policy tranche): effective
-     * eye-to-hitVec cutoff for the bone ray-test. The bridge transports
-     * it into the seal, it never owns a combat number. */
-    private double combatReach;
+     * band by qualified mob ref, in seal order. The bridge transports
+     * them into the seal, it never owns a spawn number. The companion
+     * mirrors the effective cap (see its SPAWN_CAP note). Global
+     * overrides apply uniformly per mob — the same specs ride every
+     * mob's effectiveSpawn call, so an operator cap wins for all mobs
+     * alike; per-mob override keys are a named follow-up, never smuggled
+     * in here. */
+    private final LinkedHashMap<String, Long> spawnCap =
+            new LinkedHashMap<String, Long>();
+    private final LinkedHashMap<String, Long> spawnBudget =
+            new LinkedHashMap<String, Long>();
+    private final LinkedHashMap<String, Long> spawnYMin =
+            new LinkedHashMap<String, Long>();
+    private final LinkedHashMap<String, Long> spawnYMax =
+            new LinkedHashMap<String, Long>();
+    /** Spec hp by qualified mob ref, in seal order (content-only, same
+     * split as the weakspot multipliers — no operator key, never a quiet
+     * knob). */
+    private final LinkedHashMap<String, Long> spawnHp =
+            new LinkedHashMap<String, Long>();
+    /** Combat reach, sealed per mob from the content table at wire time
+     * (hub decisions/VIRTUAL_HITBOXES.md combat-policy tranche):
+     * effective eye-to-hitVec cutoff by short mob name, in seal order —
+     * content reach unless the operator {@code combat.reach} wins, the
+     * same specs riding every mob (uniform, like spawn — per-mob
+     * override keys are a named follow-up). The bridge transports it
+     * into the hook, it never owns a combat number. */
+    private final LinkedHashMap<String, Double> combatReach =
+            new LinkedHashMap<String, Double>();
     /** Loot policy, sealed from the content table at wire time unless
      * the operator {@code loot.count} wins (operator-override tranche):
      * effective items per harvest. Transported, never owned. */
@@ -180,9 +200,19 @@ public final class MatouBridgeMod {
     private String oreKind;
     private String beastKind;
     private StateVocabulary lootVocab;
+    /** First sealed qualified mob ref (null when passive — Q1
+     * cohabitation): the hooks gate on {@link #spawnMobs} being empty
+     * (the same invariant), this stays for cells and logs where the
+     * first mob is the sensible sole view. */
     private String spawnMob;
+    /** Sealed mobs, short name to qualified ref, in seal order: the
+     * per-mob dispatch truth (census cells, seals and landings key off
+     * it; empty means passive). */
+    private final LinkedHashMap<String, String> spawnMobs =
+            new LinkedHashMap<String, String>();
     private StateVocabulary spawnVocab;
-    private long spawnHp;
+    /** Owned content path (shared with the future spawn wire — same file
+     * funds both tables, parsed once here). */
     private String ownedPath;
     private long tick;
 
@@ -329,33 +359,47 @@ public final class MatouBridgeMod {
     }
 
     /**
-      * Spawn wiring: the single mob ref plus its spec hp plus the
+      * Spawn wiring: the sealed mobs plus their spec hp plus the
       * effective spawn policy from the first wire's pack policy (parsed
       * once at pack wire time, like registration — never on the tick
-      * path): content cap/budget/band unless the operator
-      * {@code spawn.*} wins (T2 operator-override tranche). The hp lands
-     * on the beast's max-health attribute at every landing (hp tranche,
-     * hub decisions/SPAWN.md) — a spec field with no live reader would
-     * be a silent default; the same holds for the effective policy. No
-     * owned file anywhere means spawn stays passive (Q1 cohabitation):
-     * the hooks gate on the null mob.
-     */
+      * path): content cap/budget/band per mob unless the operator
+      * {@code spawn.*} wins (T2 operator-override tranche, applied with
+      * the same specs per mob — a global override wins uniformly, never
+      * per mob). The hp lands on each beast's max-health attribute at
+      * every landing (hp tranche, hub decisions/SPAWN.md) — a spec field
+      * with no live reader would be a silent default; the same holds for
+      * the effective policy. No owned file anywhere means spawn stays
+      * passive (Q1 cohabitation): the hooks gate on the empty mob map.
+      *
+      * <p>Per-mob tranche (hub {@code decisions/VIRTUAL_HITBOXES.md}):
+      * shorts from {@code PolicyPack.spawnMobs()} qualify into cell refs
+      * through {@link #contentNamespace} (same-file namespace rule).
+      */
     private void wireSpawn(List<Packs.PackSpec> specs) {
         if (ownedPath == null) {
             return;
         }
         spawnVocab = vocabulary(SpawnStates.SCOPE, "E_SPAWN_SEAL");
         PolicyPack policy = policy("E_SPAWN_POLICY");
-        spawnMob = policy.spawnMob();
-        spawnHp = policy.spawnHp();
         spawn = policy.spawnJob();
-        long[] eff = OperatorPolicy.effectiveSpawn(policy.spawnCap(),
-                policy.spawnBudget(), policy.spawnYMin(),
-                policy.spawnYMax(), specs);
-        spawnCap = eff[0];
-        spawnBudget = eff[1];
-        spawnYMin = eff[2];
-        spawnYMax = eff[3];
+        String ns = contentNamespace();
+        for (String shortMob : policy.spawnMobs()) {
+            long[] eff = OperatorPolicy.effectiveSpawn(
+                    policy.spawnCap(shortMob),
+                    policy.spawnBudget(shortMob),
+                    policy.spawnYMin(shortMob),
+                    policy.spawnYMax(shortMob), specs);
+            String qualified = ns + ":" + shortMob;
+            if (spawnMob == null) {
+                spawnMob = qualified;
+            }
+            spawnMobs.put(shortMob, qualified);
+            spawnHp.put(qualified, Long.valueOf(policy.spawnHp(shortMob)));
+            spawnCap.put(qualified, Long.valueOf(eff[0]));
+            spawnBudget.put(qualified, Long.valueOf(eff[1]));
+            spawnYMin.put(qualified, Long.valueOf(eff[2]));
+            spawnYMax.put(qualified, Long.valueOf(eff[3]));
+        }
         List<String> over = new ArrayList<String>();
         if (OperatorPolicy.present(specs, OperatorPolicy.SPAWN_CAP)) {
             over.add("cap");
@@ -371,39 +415,105 @@ public final class MatouBridgeMod {
         }
         String spawnNote = over.isEmpty() ? ""
                 : " overridden <" + join(over) + ">";
-        System.out.println("[MatouBridge] spawn wired <" + spawnMob
-                + "> hp <" + spawnHp + "> cap <" + spawnCap
-                + "> budget <" + spawnBudget + "> y <" + spawnYMin
-                + ".." + spawnYMax + ">" + spawnNote);
+        if (spawnMobs.size() == 1) {
+            System.out.println("[MatouBridge] spawn wired <" + spawnMob
+                    + "> hp <" + spawnHp.get(spawnMob) + "> cap <"
+                    + spawnCap.get(spawnMob) + "> budget <"
+                    + spawnBudget.get(spawnMob) + "> y <"
+                    + spawnYMin.get(spawnMob) + ".."
+                    + spawnYMax.get(spawnMob) + ">" + spawnNote);
+        } else {
+            System.out.println("[MatouBridge] spawn wired <"
+                    + spawnShapes() + ">" + spawnNote);
+        }
     }
 
     /**
-     * Combat wiring: the weakspot table plus the reach attribute from
-     * the first wire's pack policy (parsed once at pack wire time, like
-     * loot/spawn — never on the tick path). The table seals into the
-     * bridge model holder the beast reads at hit time; the reach lands
-     * on the hook's ray-test cutoff — content reach unless the operator
-     * {@code combat.reach} wins (reach-override tranche, hub
-     * decisions/VIRTUAL_HITBOXES.md; weakspot multipliers stay
-     * content-only, same split as {@code spawnHp}). No owned file
-     * anywhere means combat stays passive (Q1 cohabitation): the seal
-     * stays empty and any hit-time read refuses loudly instead of
-     * defaulting 1.0x.
+     * Per-mob spawn wire shapes ({@code {short hp <h> cap <c> budget
+     * <b> y <min..max>}}, seal order, comma-joined).
      */
+    private String spawnShapes() {
+        List<String> rows = new ArrayList<String>();
+        for (Map.Entry<String, String> e : spawnMobs.entrySet()) {
+            String q = e.getValue();
+            rows.add("{" + e.getKey() + " hp <" + spawnHp.get(q)
+                    + "> cap <" + spawnCap.get(q) + "> budget <"
+                    + spawnBudget.get(q) + "> y <" + spawnYMin.get(q)
+                    + ".." + spawnYMax.get(q) + ">}");
+        }
+        return join(rows);
+    }
+
+    /**
+      * Combat wiring: the per-mob weakspot tables plus the reach
+      * attributes from the first wire's pack policy (parsed once at pack
+      * wire time, like loot/spawn — never on the tick path). The tables
+      * seal into the bridge model holder the beast reads at hit time;
+      * each mob's effective reach (content reach unless the operator
+      * {@code combat.reach} wins — same uniform rule as spawn, the same
+      * specs riding every mob) lands in the hook's per-mob map
+      * (reach-override tranche, hub decisions/VIRTUAL_HITBOXES.md;
+      * weakspot multipliers stay content-only, same split as
+      * {@code spawnHp}). No owned file anywhere means combat stays
+      * passive (Q1 cohabitation): the seal stays empty and any hit-time
+      * read refuses loudly instead of defaulting 1.0x.
+      */
     private void wireCombat(List<Packs.PackSpec> specs) {
         if (ownedPath == null) {
             return;
         }
         PolicyPack policy = policy("E_COMBAT_POLICY");
-        BeastModel.sealWeakspots(policy.combatWeakspots());
-        combatReach = OperatorPolicy.effectiveCombatReach(
-                policy.combatReach(), specs);
+        Map<String, Map<String, Float>> perMobWeakspots =
+                new LinkedHashMap<String, Map<String, Float>>();
+        Map<String, Double> perMobReach =
+                new LinkedHashMap<String, Double>();
+        for (String mob : policy.combatMobs()) {
+            perMobWeakspots.put(mob, policy.combatWeakspots(mob));
+            perMobReach.put(mob, Double.valueOf(policy.combatReach(mob)));
+            combatReach.put(mob, Double.valueOf(
+                    OperatorPolicy.effectiveCombatReach(
+                            policy.combatReach(mob), specs)));
+        }
+        BeastModel.sealCombat(perMobWeakspots, perMobReach);
         String combatNote = OperatorPolicy.present(specs,
                 OperatorPolicy.COMBAT_REACH) ? " overridden <combat.reach>"
                 : "";
-        System.out.println("[MatouBridge] combat wired <"
-                + policy.combatWeakspots() + "> reach <" + combatReach
-                + ">" + combatNote);
+        if (perMobWeakspots.size() == 1) {
+            System.out.println("[MatouBridge] combat wired <"
+                    + policy.combatWeakspots() + "> reach <"
+                    + combatReach.values().iterator().next() + ">"
+                    + combatNote);
+        } else {
+            System.out.println("[MatouBridge] combat wired <"
+                    + combatShapes(perMobWeakspots) + "> reach <"
+                    + reachShapes() + ">" + combatNote);
+        }
+    }
+
+    /**
+     * Per-mob combat table shapes ({@code {mob={bone=mult, ...}}}, seal
+     * order, comma-joined).
+     */
+    private static String combatShapes(
+            Map<String, Map<String, Float>> perMobWeakspots) {
+        List<String> rows = new ArrayList<String>();
+        for (Map.Entry<String, Map<String, Float>> e
+                : perMobWeakspots.entrySet()) {
+            rows.add("{" + e.getKey() + "=" + e.getValue() + "}");
+        }
+        return join(rows);
+    }
+
+    /**
+     * Per-mob effective reach shapes ({@code {mob=reach}}, seal order,
+     * comma-joined).
+     */
+    private String reachShapes() {
+        List<String> rows = new ArrayList<String>();
+        for (Map.Entry<String, Double> e : combatReach.entrySet()) {
+            rows.add("{" + e.getKey() + "=" + e.getValue() + "}");
+        }
+        return join(rows);
     }
 
     /** Comma join for the override log suffix (Java 8, no extra dep). */    private static String join(List<String> parts) {
@@ -504,7 +614,7 @@ public final class MatouBridgeMod {
     @SubscribeEvent
     public void onKill(LivingDropsEvent event) {
         Entity body = event.entityLiving;
-        if (spawnMob != null && body instanceof MatouEntity) {
+        if (!spawnMobs.isEmpty() && body instanceof MatouEntity) {
             // Owner discipline (measured live on loot: reobf only walks
             // in-jar superclass chains, stub supertypes never ship) —
             // the id is read through the declaring stub type (Entity).
@@ -555,6 +665,14 @@ public final class MatouBridgeMod {
      * {@code Vec3d} here). The SPI {@code Vec3d} is fully qualified
      * (the MC look type owns the short name on 1122; here there is no
      * clash, kept qualified for port symmetry).
+     *
+     * <p>Per-mob tranche (hub {@code decisions/VIRTUAL_HITBOXES.md}):
+     * the ray-test cutoff is the victim's per-mob effective reach from
+     * the wire-time map (content reach unless the operator
+     * {@code combat.reach} wins); the multiplier dispatches per mob
+     * through the victim's weakspot table. An unsealed mob refuses
+     * loudly — never a defaulted reach. Passive without a wired pack
+     * (same silent fallback as the unwired reach before).
      */
     @SubscribeEvent
     public void onHurt(LivingHurtEvent event) {
@@ -571,9 +689,19 @@ public final class MatouBridgeMod {
         if (event.source == null) {
             return;
         }
+        if (combatReach.isEmpty()) {
+            return;
+        }
         Entity attacker = event.source.getEntity();
         if (attacker == null) {
             return;
+        }
+        String shortMob = ((MatouEntity) body).mobOrFirst();
+        Double at = combatReach.get(shortMob);
+        if (at == null) {
+            throw new IllegalStateException("E_COMBAT_WIRE:unmapped mob <"
+                    + shortMob + "> (want one of " + combatReach.keySet()
+                    + " — sealed mobs only, never defaulted)");
         }
         Vec3 look = attacker.getLookVec();
         fr.iamacat.spi.hit.Vec3d origin = new fr.iamacat.spi.hit.Vec3d(
@@ -582,7 +710,7 @@ public final class MatouBridgeMod {
         fr.iamacat.spi.hit.Vec3d dir = new fr.iamacat.spi.hit.Vec3d(
                 look.xCoord, look.yCoord, look.zCoord);
         RayHit hit = HitTester.test((MatouEntity) body, origin, dir,
-                combatReach);
+                at.doubleValue());
         if (hit == null) {
             return;
         }
@@ -599,16 +727,21 @@ public final class MatouBridgeMod {
      * its entity id — own landings (which also fire this event, recorded
      * again here idempotently) and foreign beast joins alike. Recording
      * every join the veto lets through is what keeps the census equal to
-     * the living reality: a join past the cap is refused instead (the
-     * budget never decided it), anything else joins the census the pure
-     * budget counts. Vanilla pigs are a different species (ignored here,
-     * never vetoed). Passive without a wired mob, and passive unless
-     * {@code SPAWN=1} (the union and loot runs never see a beast,
+     * the living reality: a join past its mob's cap is refused instead
+     * (the budget never decided it), anything else joins the census the
+     * pure budget counts. Vanilla pigs are a different species (ignored
+     * here, never vetoed). Passive without a wired mob, and passive
+     * unless {@code SPAWN=1} (the union and loot runs never see a beast,
      * recorded or otherwise).
+     *
+     * <p>Per-mob tranche (hub {@code decisions/VIRTUAL_HITBOXES.md}):
+     * the veto counts the census entries carrying the joining entity's
+     * own mob against that mob's cap (an unsealed mob refuses loudly);
+     * the recorded cell carries the entity's qualified mob ref.
      */
     @SubscribeEvent
     public void onJoin(EntityJoinWorldEvent event) {
-        if (!SPAWN || spawnMob == null) {
+        if (!SPAWN || spawnMobs.isEmpty()) {
             return;
         }
         if (event.world.isRemote) {
@@ -626,53 +759,86 @@ public final class MatouBridgeMod {
         // entity resolves through its declaring base (EntityEvent), never
         // through the beast or the join subclass.
         Entity body = event.entity;
-        if (census.size() >= spawnCap) {
+        MatouEntity beast = (MatouEntity) body;
+        String qualified = qualifiedMob(beast);
+        int count = 0;
+        for (String cell : census.sealed().values()) {
+            if (cellMob(cell).equals(qualified)) {
+                count++;
+            }
+        }
+        long cap = spawnCap.get(qualified).longValue();
+        if (count >= cap) {
             event.setCanceled(true);
-            System.out.println("[MatouBridge] spawn vetoed <beast> at tick "
-                    + tick + " (census at cap " + spawnCap + ")");
+            System.out.println("[MatouBridge] spawn vetoed <"
+                    + beast.mob() + "> at tick "
+                    + tick + " (census at cap " + cap + ")");
             return;
         }
         int x = (int) Math.floor(body.posX);
         int y = (int) Math.floor(body.posY);
         int z = (int) Math.floor(body.posZ);
-        String cell = Cell.of(x, y, z, spawnMob).render();
+        String cell = Cell.of(x, y, z, qualified).render();
         census.record(Integer.toString(body.getEntityId()), cell, tick);
         System.out.println("[MatouBridge] spawn joined <" + cell
                 + "> at tick " + tick);
     }
 
     /**
-     * Spawn seal: census plus table, cap, budget and band beside the
-     * first wire's pack states, pure decide, land one beast per due slot,
-     * record every landing. The census is reconciled first (see
-     * {@link #reconcile}): the join event misses silent paths (measured
-     * live: a natural grass spawn bypassed it and breached the cap), so
-     * the sealed census is the polled living reality, never the event
-     * trail alone. The budgeted slots the etage-1 gate holds equal to
-     * the job decision size are re-checked loudly here: a live divergence
-     * (slots != decided) fails the tick instead of spawning off-budget
-     * silently. Passive without a wired pack or mob, and passive unless
-     * {@code SPAWN=1}.
-     */
+      * Spawn seal: census plus per-mob tables, caps, budgets and bands
+      * beside the first wire's pack states, pure decide, land one beast
+      * per due slot, record every landing. The census is reconciled first
+      * (see {@link #reconcile}): the join event misses silent paths
+      * (measured live: a natural grass spawn bypassed it and breached
+      * the cap), so the sealed census is the polled living reality,
+      * never the event trail alone. The budgeted slots the etage-1 gate
+      * holds equal to the job decision size are re-checked loudly here
+      * per mob, summed: a live divergence (slots != decided) fails the
+      * tick instead of spawning off-budget silently. Passive without a
+      * wired pack or mob, and passive unless {@code SPAWN=1}.
+      *
+      * <p>Per-mob tranche (hub {@code decisions/VIRTUAL_HITBOXES.md}):
+      * due cells already carry their mob ({@code x,y,z:mob}) — each
+      * landing lands its cell's mob.
+      */
     private void spawnTick(World world, long now) {
-        if (!SPAWN || spawnMob == null || wires.isEmpty()) {
+        if (!SPAWN || spawnMobs.isEmpty() || wires.isEmpty()) {
             return;
         }
         reconcile(world, now);
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>(
                 wires.get(0).states(now));
-        states.putAll(SpawnSeal.seal(spawnVocab, census, spawnMob,
-                spawnCap, spawnBudget, spawnYMin, spawnYMax));
+        List<String> table = new ArrayList<String>(spawnMobs.values());
+        Map<String, List<Long>> bands =
+                new LinkedHashMap<String, List<Long>>();
+        for (String qualified : table) {
+            bands.put(qualified, Arrays.asList(
+                    spawnYMin.get(qualified), spawnYMax.get(qualified)));
+        }
+        states.putAll(SpawnSeal.seal(spawnVocab, census, table,
+                spawnCap, spawnBudget, bands));
         Snapshot snap = ForgeSnapshot.snapshot(now, states);
         List<String> due = spawn.decide(snap);
-        int slots = census.slotsDue((int) spawnCap, (int) spawnBudget);
+        Map<String, String> sealed = census.sealed();
+        int slots = 0;
+        for (String qualified : table) {
+            int count = 0;
+            for (String cell : sealed.values()) {
+                if (cellMob(cell).equals(qualified)) {
+                    count++;
+                }
+            }
+            slots += census.slotsDue(count,
+                    spawnCap.get(qualified).intValue(),
+                    spawnBudget.get(qualified).intValue());
+        }
         if (slots != due.size()) {
             throw new IllegalStateException("E_SPAWN_SEAL:diverged <slots="
                     + slots + " due=" + due + "> at tick " + now);
         }
         for (String cell : due) {
             ForgeCells.BlockCell pad = ForgeCells.parseBlockCell(cell);
-            landBeast(world, pad.x, pad.y, pad.z, cell, now);
+            landBeast(world, pad.x, pad.y, pad.z, cell, pad.block, now);
         }
         if (!due.isEmpty()) {
             System.out.println("[MatouBridge] spawn landed "
@@ -688,11 +854,10 @@ public final class MatouBridgeMod {
      * fired it, a landing-only census undercounted reality and the fifth
      * living beast breached the cap loudly in the proof. The poll is the
      * census of record; events are the fast path. Adopted cells carry the
-     * spawn mob ref at the current pos (tranche 1: every dim-0 beast
-     * carries our loot through the single-table kill hook, so the pure
-     * foreign rule holds). Tranche-1 scope: beasts outside the loaded set
-     * sweep — the proof world keeps them loaded; a rejoin re-adopts next
-     * tick.
+     * entity's own qualified mob ref at the current pos (per-mob tranche,
+     * hub {@code decisions/VIRTUAL_HITBOXES.md} — never a single wired
+     * mob). Tranche-1 scope: beasts outside the loaded set sweep — the
+     * proof world keeps them loaded; a rejoin re-adopts next tick.
      *
      * <p>Owner discipline (measured live on loot): inherited vanilla
      * members go through the declaring stub type ({@code Entity}), never
@@ -712,7 +877,8 @@ public final class MatouBridgeMod {
             int y = (int) Math.floor(body.posY);
             int z = (int) Math.floor(body.posZ);
             living.put(Integer.toString(body.getEntityId()),
-                    Cell.of(x, y, z, spawnMob).render());
+                    Cell.of(x, y, z,
+                            qualifiedMob((MatouEntity) body)).render());
         }
         for (Map.Entry<String, String> e : living.entrySet()) {
             if (!census.sealed().containsKey(e.getKey())) {
@@ -731,31 +897,43 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Spawn landing: one registered beast per due slot at the decided
-     * pad, recorded into the census under its entity id. The content hp
-     * lands on the beast's max-health attribute before the spawn (hp
-     * tranche, hub decisions/SPAWN.md) and the read-back is tripwired:
-     * a beast that does not carry the spec hp fails the tick instead of
-     * roaming underpowered silently. A refused spawn fails loudly — an
-     * unrecorded beast is census drift silently otherwise.
-     *
-     * <p>Owner discipline (measured live on loot: NoSuchFieldError posX):
-     * reobf only walks in-jar superclass chains, and stub supertypes
-     * never ship — so inherited vanilla members go through the declaring
-     * stub type ({@code Entity}, {@code EntityLivingBase},
-     * {@code SharedMonsterAttributes}), never through the beast.
-     */
+      * Spawn landing: one registered beast per due slot at the decided
+      * pad, recorded into the census under its entity id. The content hp
+      * lands on the beast's max-health attribute before the spawn (hp
+      * tranche, hub decisions/SPAWN.md) and the read-back is tripwired
+      * per mob: a beast that does not carry its spec hp fails the tick
+      * instead of roaming underpowered silently. A refused spawn fails
+      * loudly — an unrecorded beast is census drift silently otherwise.
+      *
+      * <p>Per-mob tranche (hub {@code decisions/VIRTUAL_HITBOXES.md}):
+      * the hp comes from the due cell's own mob map entry (an unsealed
+      * mob refuses loudly), and the short mob identity is sealed on the
+      * entity before the spawn.
+      *
+      * <p>Owner discipline (measured live on loot: NoSuchFieldError posX):
+      * reobf only walks in-jar superclass chains, and stub supertypes
+      * never ship — so inherited vanilla members go through the declaring
+      * stub type ({@code Entity}, {@code EntityLivingBase},
+      * {@code SharedMonsterAttributes}), never through the beast.
+      */
     private void landBeast(World world, int x, int y, int z, String cell,
-            long now) {
+            String qualifiedMob, long now) {
+        Long hp = spawnHp.get(qualifiedMob);
+        if (hp == null) {
+            throw new IllegalStateException("E_SPAWN_HP:unknown mob <"
+                    + qualifiedMob + "> (want one of " + spawnHp.keySet()
+                    + " — sealed mobs only, never defaulted)");
+        }
         MatouEntity beast = new MatouEntity(world);
+        beast.setMob(shortName(qualifiedMob));
         Entity body = beast;
         EntityLivingBase living = beast;
         living.getEntityAttribute(SharedMonsterAttributes.maxHealth)
-                .setBaseValue((double) spawnHp);
-        living.setHealth((float) spawnHp);
-        if (living.getMaxHealth() != (float) spawnHp) {
+                .setBaseValue(hp.doubleValue());
+        living.setHealth(hp.floatValue());
+        if (living.getMaxHealth() != hp.floatValue()) {
             throw new IllegalStateException("E_SPAWN_HP:diverged <want="
-                    + spawnHp + " got=" + living.getMaxHealth()
+                    + hp + " got=" + living.getMaxHealth()
                     + "> at tick " + now);
         }
         body.setPositionAndRotation(x + 0.5, y, z + 0.5, 0.0f, 0.0f);
@@ -764,6 +942,80 @@ public final class MatouBridgeMod {
                     + "," + y + "," + z + ">");
         }
         census.record(Integer.toString(body.getEntityId()), cell, now);
+    }
+
+    /**
+      * Qualified ref of an entity's mob (adopts with its note when unset);
+      * afterwards {@code beast.mob()} is non-null. Loud on an unsealed
+      * mob — a census entry nobody budgeted would be silent drift.
+      */
+    private String qualifiedMob(MatouEntity beast) {
+        String shortMob = beast.mobOrFirst();
+        String qualified = spawnMobs.get(shortMob);
+        if (qualified == null) {
+            throw new IllegalStateException("E_SPAWN_MOB:unknown mob <"
+                    + shortMob + "> (want one of " + spawnMobs.keySet()
+                    + " — sealed mobs only, never defaulted)");
+        }
+        return qualified;
+    }
+
+    /**
+      * Short content name past the first colon (same split as
+      * {@code Example1Mod.registerBeast} — one convention, not two).
+      */
+    private static String shortName(String qualifiedMob) {
+        if (qualifiedMob == null) {
+            throw new NullPointerException("E_SPAWN_MOB:null mob "
+                    + "(want a \"ns:mob\" content ref)");
+        }
+        int colon = qualifiedMob.indexOf(':');
+        if (colon < 0 || colon + 1 >= qualifiedMob.length()) {
+            throw new IllegalArgumentException("E_SPAWN_MOB:type <"
+                    + qualifiedMob + "> (want a \"ns:mob\" content ref)");
+        }
+        return qualifiedMob.substring(colon + 1);
+    }
+
+    /**
+      * Content namespace for mob refs, read off the wired loot drop refs:
+      * the parser enforces one {@code namespace} per owned file and the
+      * spawn wire shares the loot wire's file (one table per bridge), so
+      * the drop refs carry the mobs' namespace. Loud when the loot wire
+      * never ran or a drop ref is bare — a guessed namespace would be a
+      * silent default. (A qualified spawn-table view through
+      * {@code PolicyPack} would remove this loot-to-spawn read — named
+      * follow-up, zero behaviour difference.)
+      */
+    private String contentNamespace() {
+        if (lootTable == null || lootTable.isEmpty()) {
+            throw new IllegalStateException("E_SPAWN_MOB:nowire (want "
+                    + "the loot table wired — one owned file funds both "
+                    + "tables)");
+        }
+        String drop = lootTable.values().iterator().next();
+        if (drop == null) {
+            throw new IllegalStateException("E_SPAWN_MOB:null drop "
+                    + "(want a \"ns:item\" drop ref to read the file "
+                    + "namespace from)");
+        }
+        int colon = drop.indexOf(':');
+        if (colon <= 0) {
+            throw new IllegalArgumentException("E_SPAWN_MOB:type <"
+                    + drop + "> (want a \"ns:item\" drop ref to read "
+                    + "the file namespace from)");
+        }
+        return drop.substring(0, colon);
+    }
+
+    /**
+      * Census-cell mob suffix (the qualified ref past the first colon —
+      * same cut as the job's census rule); a colon-less cell matches no
+      * sealed mob.
+      */
+    private static String cellMob(String cell) {
+        int cut = cell.indexOf(':');
+        return cut < 0 ? cell : cell.substring(cut + 1);
     }
 
     /**

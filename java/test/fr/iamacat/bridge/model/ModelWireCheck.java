@@ -51,6 +51,7 @@ public final class ModelWireCheck {
         testTempRoundtrip();
         testRefusals();
         testCombatReachOverride();
+        testPerMobCombat();
         System.out.println("ok model-wire-check : beast model wiring proven pure");
     }
 
@@ -79,11 +80,24 @@ public final class ModelWireCheck {
         // Proof seal (mirrors content/owned.matou — the live seal happens
         // at wireCombat, never here): the holder transports, it never
         // owns a multiplier.
-        BeastModel.sealWeakspots(Collections.singletonMap("head",
+        Map<String, Map<String, Float>> weak =
+                new LinkedHashMap<String, Map<String, Float>>();
+        weak.put("my_beast", Collections.singletonMap("head",
                 Float.valueOf(2.0F)));
+        Map<String, Double> reach = new LinkedHashMap<String, Double>();
+        reach.put("my_beast", Double.valueOf(4.0d));
+        BeastModel.sealCombat(weak, reach);
         check(BeastModel.combatWeakspots().get("head").floatValue()
                         == 2.0F,
                 "head weakspot 2x");
+        check(BeastModel.combatMobs().equals(
+                Collections.singleton("my_beast")),
+                "sole combat mob");
+        check(BeastModel.combatWeakspots("my_beast").get("head")
+                        .floatValue() == 2.0F,
+                "per-mob head weakspot 2x");
+        check(BeastModel.combatReach("my_beast") == 4.0d,
+                "per-mob reach 4.0");
     }
 
     private static void testTempRoundtrip() throws Exception {
@@ -137,11 +151,6 @@ public final class ModelWireCheck {
     private static void testCombatReachOverride() {
         CombatTable owned = CombatTable.fromFile(
                 "../example1/content/owned.matou");
-        check(owned.weakspots("my_beast").get("head").floatValue()
-                        == 2.0F
-                && owned.weakspots("my_brute").get("head").floatValue()
-                        == 3.0F,
-                "content weakspots are 2x beast 3x brute head");
         check(owned.reach("my_beast") == 4.0
                 && owned.reach("my_brute") == 5.0,
                 "content reach is 4.0 beast 5.0 brute");
@@ -184,5 +193,87 @@ public final class ModelWireCheck {
                 "E_COMBAT_WIRE:unknown");
         assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
                 null), "E_COMBAT_WIRE:null");
+    }
+
+    /**
+     * Per-mob combat seal battery (per-mob tranche, hub
+     * decisions/VIRTUAL_HITBOXES.md): two mobs seal both tables, the
+     * per-mob getters serve each, and the sole view plus null/unknown
+     * reads refuse loudly — the same seal the forge {@code wireCombat}
+     * consumes, exercised here without MC.
+     */
+    private static void testPerMobCombat() {
+        Map<String, Map<String, Float>> weak =
+                new LinkedHashMap<String, Map<String, Float>>();
+        weak.put("my_beast", Collections.singletonMap("head",
+                Float.valueOf(2.0F)));
+        Map<String, Float> brute = new LinkedHashMap<String, Float>();
+        brute.put("head", Float.valueOf(3.0F));
+        brute.put("arm", Float.valueOf(1.0F));
+        weak.put("my_brute", brute);
+        Map<String, Double> reach = new LinkedHashMap<String, Double>();
+        reach.put("my_beast", Double.valueOf(4.0d));
+        reach.put("my_brute", Double.valueOf(5.0d));
+        BeastModel.sealCombat(weak, reach);
+        check(BeastModel.combatMobs().size() == 2
+                && BeastModel.combatMobs().contains("my_beast")
+                && BeastModel.combatMobs().contains("my_brute"),
+                "two-mob seal serves both mobs");
+        check(BeastModel.combatWeakspots("my_beast").size() == 1
+                && BeastModel.combatWeakspots("my_beast").get("head")
+                        .floatValue() == 2.0F,
+                "sealed beast head 2x");
+        check(BeastModel.combatWeakspots("my_brute").size() == 2
+                && BeastModel.combatWeakspots("my_brute").get("head")
+                        .floatValue() == 3.0F
+                && BeastModel.combatWeakspots("my_brute").get("arm")
+                        .floatValue() == 1.0F,
+                "sealed brute head 3x arm 1x");
+        check(BeastModel.combatReach("my_beast") == 4.0d
+                && BeastModel.combatReach("my_brute") == 5.0d,
+                "sealed per-mob reach");
+        assertThrows(() -> BeastModel.combatWeakspots(),
+                "E_COMBAT_POLICY:multi");
+        assertThrows(() -> BeastModel.combatWeakspots(null),
+                "E_COMBAT_POLICY:null");
+        assertThrows(() -> BeastModel.combatWeakspots("nope"),
+                "E_COMBAT_POLICY:unknown");
+        assertThrows(() -> BeastModel.combatReach(null),
+                "E_COMBAT_POLICY:null");
+        assertThrows(() -> BeastModel.combatReach("nope"),
+                "E_COMBAT_POLICY:unknown");
+        assertThrows(() -> BeastModel.sealCombat(null, reach),
+                "E_COMBAT_POLICY:null");
+        assertThrows(() -> BeastModel.sealCombat(weak, null),
+                "E_COMBAT_POLICY:null");
+        assertThrows(() -> BeastModel.sealCombat(
+                new LinkedHashMap<String, Map<String, Float>>(), reach),
+                "E_COMBAT_POLICY:empty");
+        assertThrows(() -> BeastModel.sealCombat(weak,
+                new LinkedHashMap<String, Double>()),
+                "E_COMBAT_POLICY:empty");
+        Map<String, Map<String, Float>> lonely =
+                new LinkedHashMap<String, Map<String, Float>>(weak);
+        lonely.remove("my_brute");
+        assertThrows(() -> BeastModel.sealCombat(lonely, reach),
+                "E_COMBAT_POLICY:lonely");
+        Map<String, Map<String, Float>> badMult =
+                new LinkedHashMap<String, Map<String, Float>>();
+        badMult.put("my_beast", Collections.singletonMap("head",
+                Float.valueOf(0.0F)));
+        Map<String, Double> oneReach =
+                new LinkedHashMap<String, Double>();
+        oneReach.put("my_beast", Double.valueOf(4.0d));
+        assertThrows(() -> BeastModel.sealCombat(badMult, oneReach),
+                "E_COMBAT_POLICY:bad");
+        Map<String, Double> badReach =
+                new LinkedHashMap<String, Double>();
+        badReach.put("my_beast", Double.valueOf(0.0d));
+        Map<String, Map<String, Float>> oneWeak =
+                new LinkedHashMap<String, Map<String, Float>>();
+        oneWeak.put("my_beast", Collections.singletonMap("head",
+                Float.valueOf(2.0F)));
+        assertThrows(() -> BeastModel.sealCombat(oneWeak, badReach),
+                "E_COMBAT_POLICY:bad");
     }
 }

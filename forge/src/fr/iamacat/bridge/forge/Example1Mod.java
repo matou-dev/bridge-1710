@@ -14,6 +14,7 @@ import java.io.File;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -32,15 +33,17 @@ import net.minecraft.item.Item;
  * registering {@code example1:my_ore} from {@code matoubridge} lands
  * {@code matoubridge:example1:my_ore} with an "Illegal extra prefix"
  * warning), so the container owning the {@code example1:} prefix must
- * be the one registering. The same preInit registers the one generic
- * beast (hub decisions/SPAWN.md, custom entity tranche) from the
- * single-mob spawn table — pig shape and renderer reused, vanilla pigs
- * never carry our census anymore. FML runs every mod's preInit before any
- * init, so names registered here always precede {@link MatouBridgeMod}
- * init-time binds, whatever the mod order. New refusals stay
- * registration-local ({@code E_REG_*}, never in the {@code E_FORGE_*}
- * parity catalog). Only this package may import {@code net.minecraft}
- * / {@code cpw.mods}.
+ * be the one registering. The same preInit registers the generic
+ * beast (hub decisions/SPAWN.md, custom entity tranche) from the sealed
+ * spawn-table mob list — one generic registration covers every sealed
+ * mob (the NBT identity distinguishes them at runtime, hub
+ * decisions/VIRTUAL_HITBOXES.md second-beast row), pig shape and
+ * renderer reused, vanilla pigs never carry our census anymore. FML runs
+ * every mod's preInit before any init, so names registered here always
+ * precede {@link MatouBridgeMod} init-time binds, whatever the mod
+ * order. New refusals stay registration-local ({@code E_REG_*}, never
+ * in the {@code E_FORGE_*} parity catalog). Only this package may import
+ * {@code net.minecraft} / {@code cpw.mods}.
  */
 @Mod(modid = Example1Mod.MODID, name = "MatouExample1", version = "1.2.0",
         acceptableRemoteVersions = "*")
@@ -66,6 +69,7 @@ public final class Example1Mod {
     private final Map<String, Item> registeredItems =
             new HashMap<String, Item>();
     private String registeredEntity;
+    private List<String> registeredMobs;
 
     /**
      * Registration: every packs.cfg wire naming a non-vanilla block
@@ -130,7 +134,7 @@ public final class Example1Mod {
                                 + registeredEntity + ">");
             }
             System.out.println("[MatouBridge] registered-entity <"
-                    + registeredEntity + ">");
+                    + join(registeredMobs) + ">");
             if (FMLCommonHandler.instance().getSide() == Side.CLIENT) {
                 registerBeastRenderer();
             }
@@ -198,14 +202,18 @@ public final class Example1Mod {
     }
 
     /**
-     * Entity registration: the single mob ref from the same owned content
+     * Entity registration: every sealed mob ref from the same owned content
      * the loot table and the spawn wire came from (parsed once, like
-     * blocks — never on the tick path). No owned file anywhere means no
-     * beast (Q1 cohabitation), same passivity as the spawn wire. Several
-     * distinct owned files refuse loudly — silent table picks are
-     * defaults, and per-mob tables are a documented re-opener. The short
-     * mob name registers (no container prefixing on the entity path to
-     * warn about — the name rides verbatim).
+     * blocks — never on the tick path). One generic registration covers
+     * every sealed mob: the entity name rides the first sealed mob's
+     * short name (file order, so single-mob tables register
+     * byte-identical bytes), and the per-mob census/dispatch reads each
+     * beast's NBT identity — a second mod-local id would be a second
+     * entity (see {@code ENTITY_BEAST_ID}). No owned file anywhere means
+     * no beast (Q1 cohabitation), same passivity as the spawn wire.
+     * Several distinct owned files refuse loudly — silent table picks are
+     * defaults. The short mob name registers (no container prefixing on
+     * the entity path to warn about — the name rides verbatim).
      */
     private void registerBeast(List<Packs.PackSpec> specs) {
         Set<String> owned = new HashSet<String>();
@@ -223,17 +231,19 @@ public final class Example1Mod {
                     + owned + "> (one beast table per bridge)");
         }
         String ownedFile = owned.iterator().next();
-        String mob = loadMobRef(ownedFile);
-        int colon = mob.indexOf(':');
-        String shortName = mob.substring(colon + 1);
-        registeredEntity = mob;
+        List<String> mobs = loadMobRefs(ownedFile);
+        String first = mobs.get(0);
+        int colon = first.indexOf(':');
+        String shortName = first.substring(colon + 1);
+        registeredEntity = first;
+        registeredMobs = mobs;
         try {
             EntityRegistry.registerModEntity(MatouEntity.class, shortName,
                     ENTITY_BEAST_ID, this, ENTITY_TRACKING_RANGE,
                     ENTITY_UPDATE_TICKS, ENTITY_SENDS_VELOCITY);
         } catch (Exception e) {
             throw new IllegalArgumentException("E_REG_BEAST:refused <"
-                    + mob + "> (" + e.getMessage() + ")", e);
+                    + first + "> (" + e.getMessage() + ")", e);
         }
     }
 
@@ -298,13 +308,13 @@ public final class Example1Mod {
     }
 
     /**
-     * Content mob ref, reached reflectively: the bridge stays content-blind
-     * at build time (Q2 — same rule as {@code loadSpecs}). The
-     * single-mob rule lives in {@code SpawnTable.fromFile} — zero or
-     * several mobs already refuse there, never a quiet pick here. Every
+     * Content mob refs, reached reflectively: the bridge stays content-blind
+     * at build time (Q2 — same rule as {@code loadSpecs}). Every sealed
+     * mob enumerates in file order through {@code SpawnTable.mobRefs} —
+     * zero mobs already refuse there, never a quiet pick here. Every
      * failure is coded E_REG_*, never a silent default.
      */
-    private static String loadMobRef(String ownedFile) {
+    private static List<String> loadMobRefs(String ownedFile) {
         final Class<?> cls;
         try {
             cls = Class.forName("fr.iamacat.example1.SpawnTable");
@@ -323,13 +333,22 @@ public final class Example1Mod {
         }
         try {
             Object table = fromFile.invoke(null, ownedFile);
-            Object mob = table.getClass().getMethod("mob").invoke(table);
-            if (!(mob instanceof String) || ((String) mob).isEmpty()
-                    || ((String) mob).indexOf(':') < 0) {
+            Object refs = table.getClass().getMethod("mobRefs")
+                    .invoke(table);
+            if (!(refs instanceof List) || ((List<?>) refs).isEmpty()) {
                 throw new IllegalStateException("E_REG_BEAST:shape "
-                        + "<fromFile> (want qualified mob ref)");
+                        + "<fromFile> (want non-empty qualified mob list)");
             }
-            return (String) mob;
+            List<String> out = new ArrayList<String>();
+            for (Object o : (List<?>) refs) {
+                if (!(o instanceof String) || ((String) o).isEmpty()
+                        || ((String) o).indexOf(':') < 0) {
+                    throw new IllegalStateException("E_REG_BEAST:shape "
+                            + "<fromFile> (want qualified mob refs)");
+                }
+                out.add((String) o);
+            }
+            return out;
         } catch (java.lang.reflect.InvocationTargetException e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw new IllegalArgumentException("E_REG_BEAST:unreadable <"
@@ -425,5 +444,21 @@ public final class Example1Mod {
             throw new IllegalArgumentException("E_REG_SPEC:shape <"
                     + ownedFile + "> (no " + getter + ")", e);
         }
+    }
+
+    /**
+     * Comma join for the multi-mob registration line (same separator as
+     * {@code MatouBridgeMod.join} — one convention, not two; a single
+     * mob joins to itself, so the single-mob line stays byte-identical).
+     */
+    private static String join(List<String> parts) {
+        StringBuilder out = new StringBuilder();
+        for (String p : parts) {
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(p);
+        }
+        return out.toString();
     }
 }

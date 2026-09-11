@@ -71,6 +71,21 @@ public final class SpawnStore {
      * gate holds both paths equal.
      */
     public int slotsDue(int cap, int budget) {
+        return slotsDue(census.size(), cap, budget);
+    }
+
+    /**
+     * Count-scoped budgeted slots (per-mob tranche, hub
+     * {@code decisions/VIRTUAL_HITBOXES.md}): the same budget math over
+     * an explicit living count instead of the whole census, so the forge
+     * side can sum one room per sealed mob. The two-arg view counts the
+     * whole census (sole-mob seals stay identical).
+     */
+    public int slotsDue(int count, int cap, int budget) {
+        if (count < 0) {
+            throw new IllegalArgumentException(
+                    "E_SPAWN_STORE:range <" + count + "> (want >= 0)");
+        }
         if (cap <= 0) {
             throw new IllegalArgumentException(
                     "E_SPAWN_STORE:range <" + cap + "> (want cap > 0)");
@@ -80,7 +95,7 @@ public final class SpawnStore {
                     "E_SPAWN_STORE:range <" + budget
                             + "> (want budget > 0)");
         }
-        return Math.min(budget, Math.max(cap - census.size(), 0));
+        return Math.min(budget, Math.max(cap - count, 0));
     }
 
     /** Seal view for snapshot states (entity id to spawn cell). A copy. */
