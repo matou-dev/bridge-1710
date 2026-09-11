@@ -5,6 +5,7 @@ import fr.iamacat.spi.hit.BoneBox;
 import fr.iamacat.spi.hit.Hittable;
 import java.util.List;
 import java.util.Map;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.passive.EntityPig;
 import net.minecraft.world.World;
 
@@ -24,9 +25,10 @@ import net.minecraft.world.World;
  *   * <p>Model tranche (hub decisions/MATOU_MODEL.md): the beast is a
  * {@code Hittable} over the shipped {@code my_beast.geo.json} shape —
  * world-space bone boxes ride the entity origin (feet), the head stays
- * the 2x weakspot. No combat hook reads them yet (that is the combat
- * tranche); this only serves the authoritative shape both sides will
- * ray-test.
+ * the 2x weakspot. The combat tranche (hub
+ * decisions/VIRTUAL_HITBOXES.md) reads them through
+ * {@code MatouBridgeMod.onHurt}; this only serves the authoritative
+ * shape both sides ray-test.
  *
  * <p>1.7.10 shape: same superclass as the lead bridge
  * ({@code EntityPig}, {@code (World)} ctor — the spawn seam already lands
@@ -46,7 +48,13 @@ public final class MatouEntity extends EntityPig implements Hittable {
 
     @Override
     public List<BoneBox> hitBoxes() {
-        return BeastModel.cached().boxesAt(posX, posY, posZ);
+        // Owner discipline (measured live on 1122 combat 2026-09-11:
+        // bare posX reads owner MatouEntity, whose reobf walk dies at
+        // the vanilla EntityPig link — hub decisions/LOOT.md): inherited
+        // vanilla members go through the declaring stub type (Entity),
+        // never the beast.
+        Entity self = this;
+        return BeastModel.cached().boxesAt(self.posX, self.posY, self.posZ);
     }
 
     @Override

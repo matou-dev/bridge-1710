@@ -31,6 +31,16 @@ public class EntityLivingBase extends Entity {
         return 0.0f;
     }
 
+    /**
+     * Combat-companion compile stub: the autoplay combat leg polls the
+     * struck beast health through this declaring type (owner discipline)
+     * — {@code getHealth} is {@code func_110143_aJ ()F}, pinned to the
+     * 1.7.10 SRG by tools/autoplay/want.txt. Never runs.
+     */
+    public float getHealth() {
+        return 0.0f;
+    }
+
     public void setHealth(float health) {
     }
 }

@@ -1,5 +1,6 @@
 package net.minecraft.entity;
 
+import net.minecraft.util.Vec3;
 import net.minecraft.world.World;
 
 /**
@@ -48,5 +49,21 @@ public class Entity {
     }
 
     public void setDead() {
+    }
+
+    /**
+     * Combat compile stub: 1614 {@code Entity} declares the attacker
+     * eye/look surface the bridge combat hook reads through this
+     * declaring type (owner discipline — same searge as the 1122 lead:
+     * {@code getLookVec} is {@code func_70040_Z ()->Vec3},
+     * {@code getEyeHeight} is {@code func_70047_e ()F}, pinned to the
+     * 1.7.10 SRG by tools/run-live.sh). Never runs.
+     */
+    public Vec3 getLookVec() {
+        return null;
+    }
+
+    public float getEyeHeight() {
+        return 0.0f;
     }
 }

@@ -53,3 +53,13 @@ F net/minecraft/entity/Entity posX field_70165_t
 F net/minecraft/entity/Entity posY field_70163_u
 F net/minecraft/entity/Entity posZ field_70161_v
 F net/minecraft/init/Items diamond field_151045_i
+# Combat proof (COMBAT=1, rides a SPAWN=1 run — ported from the 1122
+# lead): the companion teleports the joined player beside the first
+# bridge-landed beast, aims at the head bone and drives the genuine
+# vanilla attack path (attackTargetEntityWithCurrentItem, same searge
+# func_71059_n here), then polls the struck health through
+# EntityLivingBase/getHealth (the attacker eye it aimed from reads
+# through Entity/getEyeHeight, declaring type). Same searge practice.
+M net/minecraft/entity/player/EntityPlayer attackTargetEntityWithCurrentItem func_71059_n (Lnet/minecraft/entity/Entity;)V 0
+M net/minecraft/entity/EntityLivingBase getHealth func_110143_aJ ()F 0
+M net/minecraft/entity/Entity getEyeHeight func_70047_e ()F 0

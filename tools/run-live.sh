@@ -133,6 +133,18 @@ pin_field "net/minecraft/entity/Entity/lastTickPosY"
 pin_field "net/minecraft/entity/Entity/lastTickPosZ"
 pin_field "net/minecraft/entity/Entity/rotationYaw"
 pin_field "net/minecraft/entity/Entity/rotationPitch"
+# Combat tranche (hub decisions/VIRTUAL_HITBOXES.md, server weakspot hook
+# — ported from the 1122 lead): the attacker eye/look surface plus the
+# look components. 1614-native notes: DamageSource.getEntity is the
+# 1.7.10 MCP name for the 1122 getTrueSource (same searge func_76346_g),
+# and the look type is Vec3 with xCoord/yCoord/zCoord (no Vec3d here) —
+# same grep discipline as every row above.
+pin_method "net/minecraft/entity/Entity/getLookVec" "()Lnet/minecraft/util/Vec3;"
+pin_method "net/minecraft/entity/Entity/getEyeHeight" "()F"
+pin_method "net/minecraft/util/DamageSource/getEntity" "()Lnet/minecraft/entity/Entity;"
+pin_field "net/minecraft/util/Vec3/xCoord"
+pin_field "net/minecraft/util/Vec3/yCoord"
+pin_field "net/minecraft/util/Vec3/zCoord"
 echo "ok b3-live : stubs pinned to SRG"
 
 # 2. Provision the 1614 server once (idempotent, checksum-verified).
@@ -185,6 +197,9 @@ pin_uni 'net.minecraftforge.event.world.BlockEvent$BreakEvent' 'BreakEvent('
 pin_uni 'net.minecraftforge.event.world.BlockEvent$HarvestDropsEvent' 'HarvestDropsEvent('
 pin_uni 'net.minecraftforge.event.entity.living.LivingEvent' 'entityLiving'
 pin_uni 'net.minecraftforge.event.entity.living.LivingDropsEvent' 'LivingDropsEvent('
+pin_uni 'net.minecraftforge.event.entity.living.LivingHurtEvent' 'LivingHurtEvent('
+pin_uni 'net.minecraftforge.event.entity.living.LivingHurtEvent' 'source;'
+pin_uni 'net.minecraftforge.event.entity.living.LivingHurtEvent' 'ammount;'
 pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerBlock(aji, java.lang.String)'
 pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerItem(adb, java.lang.String)'
 pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'findItem(java.lang.String, java.lang.String)'
@@ -336,8 +351,9 @@ live_boot "$SERV" "$BOOT_SECS" "boot-b3.log" "$J8/java" -Xmx1G -jar "$UNI" nogui
 # 6. Fail loudly on any runtime refusal or linkage error. E_MODEL rides
 # here since the model tranche (same as 1122: the server ignores the geo
 # cleanly, any server-side model refusal fails loudly instead of passing
-# silently).
-live_verdict "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|Encountered an unexpected exception" "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|Caused by" "$SERV/boot-b3.log"
+# silently). E_HIT rides it since the combat tranche (same as 1122: the
+# hook refuses corrupt attacker state loudly out of SPI).
+live_verdict "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|E_HIT\|Encountered an unexpected exception" "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|E_HIT\|Caused by" "$SERV/boot-b3.log"
 
 # 7. Positive proof: world blocks in chunks (0..1, -1..1) at y=60..61
 #    plus y=63..65 must equal the pure decision union — nothing foreign,

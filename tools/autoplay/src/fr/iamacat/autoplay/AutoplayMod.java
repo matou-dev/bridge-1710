@@ -7,6 +7,13 @@ import cpw.mods.fml.common.gameevent.TickEvent;
 import cpw.mods.fml.common.registry.GameRegistry;
 import cpw.mods.fml.relauncher.Side;
 import fr.iamacat.bridge.forge.MatouEntity;
+import fr.iamacat.spi.hit.AABBd;
+import fr.iamacat.spi.hit.BoneBox;
+import fr.iamacat.spi.model.MatouModel;
+import fr.iamacat.spi.model.MatouModelParser;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
@@ -169,6 +176,21 @@ public class AutoplayMod {
     static final float SPAWN_HP = 20.0f;
     static final int SPAWN_KILL_TICK = 1000;
     static final int SPAWN_TIMEOUT = 600;
+    /** Combat proof (DEV ONLY, rides a SPAWN=1 run — ported from the
+     * 1122 lead, hub decisions/VIRTUAL_HITBOXES.md server weakspot
+     * hook): at COMBAT_TICK the companion teleports the joined player
+     * beside the first living bridge beast, aims at the head bone and
+     * strikes through the genuine vanilla attack path — then polls the
+     * wound for exactly 2.0 (bare-hand 1.0 x head 2x). Without SPAWN=1
+     * nothing runs (COMBAT=1 alone fails loudly); without COMBAT=1 the
+     * run is byte-for-byte the proven spawn run. */
+    static final boolean COMBAT = "1".equals(System.getenv("COMBAT"));
+    static final int COMBAT_TICK = 500;
+    static final int COMBAT_TIMEOUT = 200;
+    /** Operator beast shape (same file the bridge bakes — hub
+     * decisions/MATOU_MODEL.md): the companion parses it pure for the
+     * head aim, never a hardcoded offset. */
+    static final String COMBAT_GEO = "config/matoubridge/my_beast.geo.json";
 
     volatile int serverTicks = 0;
     volatile int worldTicks = 0;
@@ -196,6 +218,12 @@ public class AutoplayMod {
     volatile boolean carrierDropped = false;
     volatile boolean spawnFailed = false;
     volatile int carrierTick = -1;
+    volatile boolean combatStruck = false;
+    volatile boolean combatResolved = false;
+    volatile boolean combatFailed = false;
+    volatile int combatTick = -1;
+    volatile float combatHpBefore = -1.0f;
+    volatile MatouEntity combatVictim = null;
     World world = null;
     boolean foreignNoted = false;
     boolean playerNoted = false;
@@ -243,7 +271,7 @@ public class AutoplayMod {
                 || event.phase != TickEvent.Phase.END) {
             return;
         }
-        if (!SPIKE && !LOOT && !SPAWN) {
+        if (!SPIKE && !LOOT && !SPAWN && !COMBAT) {
             return;
         }
         if (event.world.provider.dimensionId != 0) {
@@ -276,6 +304,10 @@ public class AutoplayMod {
                         + SPAWN_CAP + "> killAt=" + SPAWN_KILL_TICK
                         + " (SPAWN=1)");
             }
+            if (COMBAT) {
+                System.out.println("[MatouAutoplay] combat armed <strikeAt="
+                        + COMBAT_TICK + "> (COMBAT=1, rides SPAWN=1)");
+            }
         }
         worldTicks++;
         if (SPIKE) {
@@ -287,6 +319,9 @@ public class AutoplayMod {
         }
         if (LOOT && !lootFailed) {
             lootTick();
+        }
+        if (COMBAT && !SPAWN && !combatFailed) {
+            combatFail("COMBAT=1 wants SPAWN=1 (no beasts to strike)");
         }
         if (SPAWN && !spawnFailed) {
             spawnTick();
@@ -578,6 +613,13 @@ public class AutoplayMod {
                     + "> at worldTick " + worldTicks);
             return;
         }
+        if (COMBAT && !combatFailed && pigSeen && first != null) {
+            if (!combatStruck && worldTicks >= COMBAT_TICK) {
+                combatAttack(first);
+            } else if (combatStruck && !combatResolved) {
+                combatPoll();
+            }
+        }
         if (!pigKilled && pigSeen && first != null
                 && worldTicks >= SPAWN_KILL_TICK) {
             spawnKill(first);
@@ -648,6 +690,168 @@ public class AutoplayMod {
                 && Math.abs(e.posZ - (z + 0.5)) < 3.0;
     }
 
+    private void combatFail(String what) {
+        combatFailed = true;
+        System.out.println("[MatouAutoplay] FAIL combat-proof : " + what);
+    }
+
+    /**
+     * Combat strike (ported from the 1122 lead): teleport the joined
+     * player beside the beast, aim at the head bone and strike through
+     * the genuine vanilla attack path, atomic in one server tick. Owner
+     * discipline (measured live on loot): inherited vanilla members go
+     * through the declaring stub type — {@code Entity} for
+     * positions/eye/teleport (the 1710 lists are raw, hence the casts),
+     * {@code EntityPlayer} for the strike itself (declared there),
+     * {@code EntityLivingBase} for the health read.
+     */
+    private void combatAttack(MatouEntity beast) {
+        if (world.playerEntities == null
+                || world.playerEntities.isEmpty()) {
+            if (worldTicks > COMBAT_TICK + COMBAT_TIMEOUT) {
+                combatFail("player never joined (no strike author)");
+            }
+            return;
+        }
+        double[] head = combatHeadCenter();
+        if (head == null) {
+            return;
+        }
+        Entity body = beast;
+        if (combatVictim == null) {
+            combatVictim = beast;
+        }
+        double bx = body.posX;
+        double by = body.posY;
+        double bz = body.posZ;
+        EntityPlayer player = (EntityPlayer) world.playerEntities.get(0);
+        Entity pbody = player;
+        float eyeH = pbody.getEyeHeight();
+        if (!(eyeH > 1.0f && eyeH < 2.0f)) {
+            combatFail("eye height diverged <" + eyeH
+                    + "> (want the standing player ~1.62)");
+            return;
+        }
+        // Stand-off 2.2 blocks east on the beast ground plane (flat
+        // proof world — same Y is standing ground; well inside the
+        // vanilla reach so the genuine path delivers the hurt, far
+        // enough that the descending ray clears the body box top and
+        // lands the head first — measured on the lead).
+        double px = bx + 2.2;
+        double py = by;
+        double pz = bz;
+        double ex = px;
+        double ey = py + eyeH;
+        double ez = pz;
+        double tx = bx + head[0];
+        double ty = by + head[1];
+        double tz = bz + head[2];
+        double dx = tx - ex;
+        double dy = ty - ey;
+        double dz = tz - ez;
+        double horiz = Math.sqrt(dx * dx + dz * dz);
+        if (horiz < 0.5) {
+            combatFail("stand-off degenerate (beast under the player?)");
+            return;
+        }
+        double len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        // MC yaw faces +Z at 0 (-90 at +X, same getLookVec formula as
+        // 1122): yaw = -deg(atan2(-dx, -dz)) - 180, pitch =
+        // -deg(atan2(dy, horiz)). Self-checked below.
+        float yaw = (float) (-Math.toDegrees(Math.atan2(-dx, -dz))
+                - 180.0);
+        while (yaw <= -180.0f) {
+            yaw += 360.0f;
+        }
+        while (yaw > 180.0f) {
+            yaw -= 360.0f;
+        }
+        float pitch = (float) -Math.toDegrees(Math.atan2(dy, horiz));
+        // Aim self-check: re-derive the look with the vanilla formula
+        // and demand it points at the head (DEV-only assertion — the
+        // bridge hook reads the real look; this only guards a wasted
+        // live run on bad aim math).
+        double r = Math.PI / 180.0;
+        double f = Math.cos(-yaw * r - Math.PI);
+        double f1 = Math.sin(-yaw * r - Math.PI);
+        double f2 = -Math.cos(-pitch * r);
+        double f3 = Math.sin(-pitch * r);
+        double dot = (f1 * f2 * dx + f3 * dy + f * f2 * dz) / len;
+        if (!(dot > 0.999)) {
+            combatFail("aim diverged <dot=" + dot + "> (want > 0.999)");
+            return;
+        }
+        EntityLivingBase living = beast;
+        combatHpBefore = living.getHealth();
+        pbody.setPositionAndRotation(px, py, pz, yaw, pitch);
+        player.attackTargetEntityWithCurrentItem(beast);
+        combatTick = worldTicks;
+        combatStruck = true;
+        System.out.println("[MatouAutoplay] combat struck <head hp="
+                + combatHpBefore + "> at worldTick " + combatTick);
+    }
+
+    /**
+     * Combat poll: the bridge hook refines the struck hurt to head x2
+     * the same tick, so the wound reads exactly 2.0 (bare-hand 1.0 —
+     * the exact assert fails loudly on any surprise).
+     */
+    private void combatPoll() {
+        if (combatVictim == null) {
+            combatFail("victim lost before poll");
+            return;
+        }
+        EntityLivingBase living = combatVictim;
+        float hp = living.getHealth();
+        float drop = combatHpBefore - hp;
+        if (Math.abs(drop - 2.0f) < 1e-3f) {
+            combatResolved = true;
+            System.out.println("[MatouAutoplay] combat resolved <drop="
+                    + drop + " hp=" + hp + "> at worldTick " + worldTicks
+                    + " (elapsed " + (worldTicks - combatTick) + ")");
+            return;
+        }
+        if (worldTicks > combatTick + COMBAT_TIMEOUT) {
+            combatFail("timeout <drop=" + drop + " hp=" + hp
+                    + "> (want exactly 2.0, head x2 over bare-hand 1.0)");
+        }
+    }
+
+    /**
+     * Head aim, parsed pure from the shipped shape (same bytes the
+     * bridge bakes — hub decisions/MATOU_MODEL.md owns the format, this
+     * only reads the bone center, never a hardcoded offset).
+     */
+    private double[] combatHeadCenter() {
+        byte[] bytes;
+        try {
+            bytes = Files.readAllBytes(Paths.get(COMBAT_GEO));
+        } catch (Exception e) {
+            combatFail("geo unreadable <" + COMBAT_GEO + "> ("
+                    + e.getMessage() + ")");
+            return null;
+        }
+        MatouModel model;
+        try {
+            model = MatouModelParser.parse(
+                    new String(bytes, StandardCharsets.UTF_8));
+        } catch (RuntimeException bad) {
+            combatFail("geo rejected <" + bad.getMessage() + ">");
+            return null;
+        }
+        for (BoneBox bb : model.boneBoxes()) {
+            if ("head".equals(bb.boneName)) {
+                AABBd b = bb.box;
+                return new double[] {
+                    (b.minX + b.maxX) / 2.0,
+                    (b.minY + b.maxY) / 2.0,
+                    (b.minZ + b.maxZ) / 2.0 };
+            }
+        }
+        combatFail("geo headless (the weakspot table names head)");
+        return null;
+    }
+
     private void poll() {
         if (!world.isAirBlock(SPIKE_X, SPIKE_Y, SPIKE_Z)) {
             repopped = true;
@@ -692,9 +896,16 @@ public class AutoplayMod {
             mc.shutdown();
             return;
         }
+        if (COMBAT && combatFailed && !done) {
+            done = true;
+            System.out.println("[MatouAutoplay] combat FAILED, shutting down");
+            mc.shutdown();
+            return;
+        }
         if (serverTicks >= WAIT_SERVER_TICKS && (!SPIKE || repopped)
                 && (!LOOT || (oreDropped && beastDropped))
                 && (!SPAWN || (pigSeen && carrierDropped))
+                && (!COMBAT || combatResolved)
                 && !done) {
             done = true;
             System.out.println("[MatouAutoplay] done after " + serverTicks + " server ticks, shutting down");
