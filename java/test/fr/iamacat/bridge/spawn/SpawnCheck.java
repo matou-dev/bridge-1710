@@ -29,6 +29,9 @@ public final class SpawnCheck {
     private SpawnCheck() {}
 
     private static final String MOB = "example1.content:my_beast";
+    private static final String BRUTE = "example1.content:my_brute";
+    private static final String BEAST_SHORT = "my_beast";
+    private static final String BRUTE_SHORT = "my_brute";
 
     private static void check(boolean cond, String what) {
         if (!cond) {
@@ -75,10 +78,14 @@ public final class SpawnCheck {
     }
 
     private static Snapshot seal(SpawnStore store, long tick) {
+        // Single-mob dispatch (per-mob port tranche TODO): the beast
+        // row funds the scalar seal — sole views refuse on two-mob
+        // content, never a silent first-mob default.
         SpawnTable wired = table();
         Map<MatouId, Object> states =
-                SpawnSeal.seal(vocab(), store, wired.mob(), wired.cap(),
-                        wired.budget(), wired.yMin(), wired.yMax());
+                SpawnSeal.seal(vocab(), store, MOB, wired.cap(BEAST_SHORT),
+                        wired.budget(BEAST_SHORT), wired.yMin(BEAST_SHORT),
+                        wired.yMax(BEAST_SHORT));
         return ForgeSnapshot.snapshot(tick, states);
     }
 
@@ -110,15 +117,34 @@ public final class SpawnCheck {
     public static void main(String[] args) {
         SpawnJob job = new SpawnJob();
 
-        // Table wires from the sibling content (single mob funds spawn,
-        // policy included — the gate proves content-decided numbers ride
-        // the seal, never bridge constants).
+        // Table wires from the sibling content (both mobs seal policy —
+        // the gate proves content-decided numbers ride the seal, never
+        // bridge constants; this bridge still dispatches the beast
+        // alone, funded from its per-mob row).
         SpawnTable wired = table();
-        check(MOB.equals(wired.mob()), "table wires beast");
-        check(wired.cap() == 4L, "table wires authorial cap");
-        check(wired.budget() == 1L, "table wires authorial budget");
-        check(wired.yMin() == 66L && wired.yMax() == 68L,
-                "table wires authorial y band");
+        check(new ArrayList<String>(wired.mobs()).equals(
+                Arrays.asList(BEAST_SHORT, BRUTE_SHORT)),
+                "table wires both mobs in file order");
+        check(wired.hp(BEAST_SHORT) == 20L
+                && wired.hp(BRUTE_SHORT) == 30L,
+                "table wires per-mob hp");
+        check(wired.cap(BEAST_SHORT) == 4L
+                && wired.cap(BRUTE_SHORT) == 4L,
+                "table wires per-mob cap");
+        check(wired.budget(BEAST_SHORT) == 1L
+                && wired.budget(BRUTE_SHORT) == 1L,
+                "table wires per-mob budget");
+        check(wired.yMin(BEAST_SHORT) == 66L
+                && wired.yMax(BEAST_SHORT) == 68L
+                && wired.yMin(BRUTE_SHORT) == 66L
+                && wired.yMax(BRUTE_SHORT) == 68L,
+                "table wires per-mob y band");
+        // Sole views refuse on multi-mob content by design — this pins
+        // why the per-mob dispatch port is needed, never silent.
+        final SpawnTable multi = wired;
+        expectIAE(new Runnable() {
+            @Override public void run() { multi.mob(); }
+        }, "sole-view mob on two-mob content");
 
         // Store: record, release, budgeted slots on both sides of cap.
         SpawnStore store = new SpawnStore();
@@ -172,8 +198,8 @@ public final class SpawnCheck {
         SpawnStore js = new SpawnStore();
         js.record("11", "1,66,2:" + MOB, 100L);
         List<String> jdue = job.decide(seal(js, 110L));
-        check(jdue.size() == js.slotsDue((int) wired.cap(),
-                (int) wired.budget()),
+        check(jdue.size() == js.slotsDue((int) wired.cap(BEAST_SHORT),
+                (int) wired.budget(BEAST_SHORT)),
                 "job decides the budgeted slots");
         check(jdue.size() == 1
                 && jdue.get(0).matches(
@@ -199,18 +225,20 @@ public final class SpawnCheck {
         // routes through the shipped SpawnSeal, so every assertion below
         // exercises the live path).
         Map<MatouId, Object> st = SpawnSeal.seal(vocab(), seeded(),
-                MOB, wired.cap(), wired.budget(), wired.yMin(),
-                wired.yMax());
+                MOB, wired.cap(BEAST_SHORT), wired.budget(BEAST_SHORT),
+                wired.yMin(BEAST_SHORT), wired.yMax(BEAST_SHORT));
         check(st.get(SpawnJob.CENSUS) instanceof Map,
                 "seal carries example1.spawn:census");
         check(MOB.equals(st.get(SpawnJob.TABLE)),
                 "seal carries example1.spawn:table");
-        check(Long.valueOf(wired.cap()).equals(st.get(SpawnJob.CAP)),
+        check(Long.valueOf(wired.cap(BEAST_SHORT)).equals(
+                st.get(SpawnJob.CAP)),
                 "seal carries example1.spawn:cap");
-        check(Long.valueOf(wired.budget()).equals(st.get(SpawnJob.BUDGET)),
+        check(Long.valueOf(wired.budget(BEAST_SHORT)).equals(
+                st.get(SpawnJob.BUDGET)),
                 "seal carries example1.spawn:budget");
-        check(Arrays.asList(Long.valueOf(wired.yMin()),
-                Long.valueOf(wired.yMax())).equals(
+        check(Arrays.asList(Long.valueOf(wired.yMin(BEAST_SHORT)),
+                Long.valueOf(wired.yMax(BEAST_SHORT))).equals(
                 st.get(SpawnJob.Y)), "seal carries example1.spawn:y");
         check(new ArrayList<MatouId>(st.keySet()).equals(Arrays.asList(
                 SpawnJob.CENSUS, SpawnJob.TABLE, SpawnJob.CAP,
@@ -219,8 +247,8 @@ public final class SpawnCheck {
         SpawnStore iso = new SpawnStore();
         iso.record("1", "1,66,2:" + MOB, 5L);
         Map<MatouId, Object> snap0 = SpawnSeal.seal(vocab(), iso,
-                MOB, wired.cap(), wired.budget(), wired.yMin(),
-                wired.yMax());
+                MOB, wired.cap(BEAST_SHORT), wired.budget(BEAST_SHORT),
+                wired.yMin(BEAST_SHORT), wired.yMax(BEAST_SHORT));
         iso.record("2", "9,67,9:" + MOB, 6L);
         check(((Map<?, ?>) snap0.get(SpawnJob.CENSUS)).size() == 1,
                 "sealed census is a copy, later records never leak");
@@ -281,10 +309,11 @@ public final class SpawnCheck {
         for (int budget = 1; budget <= 2; budget++) {
             for (long tick = 95L; tick <= 125L; tick += 10L) {
                 int viaStore = seeded().slotsDue(
-                        (int) wired.cap(), budget);
+                        (int) wired.cap(BEAST_SHORT), budget);
                 Map<MatouId, Object> states = SpawnSeal.seal(
-                        vocab(), seeded(), MOB, wired.cap(), budget,
-                        wired.yMin(), wired.yMax());
+                        vocab(), seeded(), MOB, wired.cap(BEAST_SHORT),
+                        budget, wired.yMin(BEAST_SHORT),
+                        wired.yMax(BEAST_SHORT));
                 List<String> viaJob = job.decide(
                         ForgeSnapshot.snapshot(tick, states));
                 check(viaJob.size() == viaStore,
@@ -298,19 +327,22 @@ public final class SpawnCheck {
         // forge wire consumes, exercised here through the shipped
         // OperatorPolicy.
         SpawnTable content = table();
-        long[] eff = OperatorPolicy.effectiveSpawn(content.cap(),
-                content.budget(), content.yMin(), content.yMax(),
+        long[] eff = OperatorPolicy.effectiveSpawn(
+                content.cap(BEAST_SHORT), content.budget(BEAST_SHORT),
+                content.yMin(BEAST_SHORT), content.yMax(BEAST_SHORT),
                 specs(spec("example1:my_ore")));
         check(eff[0] == 4L && eff[1] == 1L && eff[2] == 66L
                 && eff[3] == 68L, "operator absent means content policy");
-        long[] over = OperatorPolicy.effectiveSpawn(content.cap(),
-                content.budget(), content.yMin(), content.yMax(),
+        long[] over = OperatorPolicy.effectiveSpawn(
+                content.cap(BEAST_SHORT), content.budget(BEAST_SHORT),
+                content.yMin(BEAST_SHORT), content.yMax(BEAST_SHORT),
                 specs(spec("example1:my_ore", "spawn.cap", "2")));
         check(over[0] == 2L && over[1] == 1L && over[2] == 66L
                 && over[3] == 68L,
                 "operator spawn.cap wins over content");
-        long[] full = OperatorPolicy.effectiveSpawn(content.cap(),
-                content.budget(), content.yMin(), content.yMax(),
+        long[] full = OperatorPolicy.effectiveSpawn(
+                content.cap(BEAST_SHORT), content.budget(BEAST_SHORT),
+                content.yMin(BEAST_SHORT), content.yMax(BEAST_SHORT),
                 specs(spec("example1:my_ore", "spawn.cap", "2",
                         "spawn.budget", "2", "spawn.y_min", "60",
                         "spawn.y_max", "61")));
@@ -335,33 +367,33 @@ public final class SpawnCheck {
         final SpawnTable contentCap = content;
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(contentCap.cap(),
-                        contentCap.budget(), contentCap.yMin(),
-                        contentCap.yMax(), specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(contentCap.cap(BEAST_SHORT),
+                        contentCap.budget(BEAST_SHORT), contentCap.yMin(BEAST_SHORT),
+                        contentCap.yMax(BEAST_SHORT), specs(spec("example1:my_ore",
                                 "spawn.cap", "0")));
             }
         }, "zero operator cap");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(contentCap.cap(),
-                        contentCap.budget(), contentCap.yMin(),
-                        contentCap.yMax(), specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(contentCap.cap(BEAST_SHORT),
+                        contentCap.budget(BEAST_SHORT), contentCap.yMin(BEAST_SHORT),
+                        contentCap.yMax(BEAST_SHORT), specs(spec("example1:my_ore",
                                 "spawn.cap", "-1")));
             }
         }, "negative operator cap");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(contentCap.cap(),
-                        contentCap.budget(), contentCap.yMin(),
-                        contentCap.yMax(), specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(contentCap.cap(BEAST_SHORT),
+                        contentCap.budget(BEAST_SHORT), contentCap.yMin(BEAST_SHORT),
+                        contentCap.yMax(BEAST_SHORT), specs(spec("example1:my_ore",
                                 "spawn.cap", "x")));
             }
         }, "non-numeric operator cap");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(contentCap.cap(),
-                        contentCap.budget(), contentCap.yMin(),
-                        contentCap.yMax(),
+                OperatorPolicy.effectiveSpawn(contentCap.cap(BEAST_SHORT),
+                        contentCap.budget(BEAST_SHORT), contentCap.yMin(BEAST_SHORT),
+                        contentCap.yMax(BEAST_SHORT),
                         specs(spec("example1:my_ore", "spawn.cap", "2"),
                                 spec("example1:my_ore",
                                         "spawn.cap", "3")));
@@ -369,25 +401,25 @@ public final class SpawnCheck {
         }, "differing operator cap");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(contentCap.cap(),
-                        contentCap.budget(), contentCap.yMin(),
-                        contentCap.yMax(), specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(contentCap.cap(BEAST_SHORT),
+                        contentCap.budget(BEAST_SHORT), contentCap.yMin(BEAST_SHORT),
+                        contentCap.yMax(BEAST_SHORT), specs(spec("example1:my_ore",
                                 "spawn.cpa", "2")));
             }
         }, "unknown operator key");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(contentCap.cap(),
-                        contentCap.budget(), contentCap.yMin(),
-                        contentCap.yMax(), specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(contentCap.cap(BEAST_SHORT),
+                        contentCap.budget(BEAST_SHORT), contentCap.yMin(BEAST_SHORT),
+                        contentCap.yMax(BEAST_SHORT), specs(spec("example1:my_ore",
                                 "spawn.y_min", "70")));
             }
         }, "operator band inverting content");
         expectIAE(new Runnable() {
             @Override public void run() {
-                OperatorPolicy.effectiveSpawn(contentCap.cap(),
-                        contentCap.budget(), contentCap.yMin(),
-                        contentCap.yMax(), specs(spec("example1:my_ore",
+                OperatorPolicy.effectiveSpawn(contentCap.cap(BEAST_SHORT),
+                        contentCap.budget(BEAST_SHORT), contentCap.yMin(BEAST_SHORT),
+                        contentCap.yMax(BEAST_SHORT), specs(spec("example1:my_ore",
                                 "spawn.y_min", "68",
                                 "spawn.y_max", "66")));
             }
