@@ -29,6 +29,21 @@
 # upstream drift fails loudly instead of running against unknown bytes.
 set -eu
 cd "$(dirname "$0")/.."
+# Shared harness steps (hub SSOT, thin version wrapper — hub
+# decisions/LIVE_SHELL_COMMON.md): sibling-absent fails loud, same shim
+# discipline as tools/run-client.sh.
+[ -f ../hub/tools/live-common.sh ] \
+  || { echo "FAIL b3-live : hub sibling absent (clone hub next to bridge-1710 — live steps source ../hub/tools/live-common.sh)"; exit 1; }
+# shellcheck disable=SC1091
+. ../hub/tools/live-common.sh
+live_init "b3-live"
+# Era-bound adapters: live-common.sh owns the mechanics; these bind the
+# caller-owned map/jars so every pin/jar call site below stays byte-identical.
+pin_method() { live_pin_method "$SRG_MCP" "$@"; }
+pin_field() { live_pin_field "$SRG_MCP" "$@"; }
+pin_uni() { live_pin_uni "$J8" "$UNI" "$@"; }
+mkjar() { live_mkjar "$1" "$2" "$BLD/MANIFEST.MF" "$J8/jar" "$EPOCH"; }
+normjar() { live_normjar "$1" "$EPOCH"; }
 B3_DIR="${B3_DIR:-${TMPDIR:-/tmp}/matou-b3-live}"
 JAVA8_HOME="${JAVA8_HOME:-/usr/lib/jvm/java-8-openjdk}"
 FORGE_URL="${FORGE_URL:-https://maven.minecraftforge.net/net/minecraftforge/forge/1.7.10-10.13.4.1614-1.7.10/forge-1.7.10-10.13.4.1614-1.7.10-installer.jar}"
@@ -73,14 +88,6 @@ fi
 
 # 1. Pin every stubbed vanilla member to the exact SRG used for reobf.
 #    A stub the SRG does not know is a loud failure, never a silent default.
-pin_method() {
-  grep -q "^MD: [^ ]* [^ ]* $1 $2\$" "$SRG_MCP" \
-    || { echo "FAIL b3-live : stub member unpinned <$1 $2>"; exit 1; }
-}
-pin_field() {
-  grep -q "^FD: [^ ]* $1\$" "$SRG_MCP" \
-    || { echo "FAIL b3-live : stub field unpinned <$1>"; exit 1; }
-}
 pin_method "net/minecraft/block/Block/getBlockFromName" "(Ljava/lang/String;)Lnet/minecraft/block/Block;"
 pin_method "net/minecraft/block/Block/setBlockName" "(Ljava/lang/String;)Lnet/minecraft/block/Block;"
 pin_method "net/minecraft/block/Block/setHardness" "(F)Lnet/minecraft/block/Block;"
@@ -133,37 +140,11 @@ echo "ok b3-live : stubs pinned to SRG"
 mkdir -p "$B3_DIR"
 SERV="$B3_DIR/server"
 mkdir -p "$SERV"
-# 2a. B3_DIR preflight: docker runs leave root-owned leftovers (build/,
-#     world/, logs/, matou-content/) that a host run cannot clear file by
-#     file (rm needs write on the root-owned parent). Fail fast with the fix
-#     instead of dying mid-run or reusing stale state silently.
-if [ -e "$B3_DIR" ]; then
-  BAD_OWNER=$(find "$B3_DIR" ! -user "$(id -un)" -print -quit 2>/dev/null || true)
-  if [ -n "$BAD_OWNER" ]; then
-    echo "FAIL b3-live : B3_DIR=<$B3_DIR> has non-owned leftovers (e.g. <$BAD_OWNER> from a docker run as root)"
-    echo "fix: sudo rm -rf <$B3_DIR/build> <$B3_DIR/server/world> <$B3_DIR/server/logs> <$B3_DIR/server/matou-content> OR B3_DIR=/tmp/matou-b3-clean $0"
-    exit 1
-  fi
-  if [ ! -w "$B3_DIR" ]; then
-    echo "FAIL b3-live : B3_DIR=<$B3_DIR> not writable (fix ownership or point B3_DIR at a user-owned dir)"
-    exit 1
-  fi
-fi
-if [ ! -f "$B3_DIR/forge-installer.jar" ]; then
-  if [ "${B3_OFFLINE:-}" = "1" ]; then
-    echo "FAIL b3-live : offline and installer absent ($B3_DIR/forge-installer.jar)"
-    exit 1
-  fi
-  curl -sL -o "$B3_DIR/forge-installer.jar" "$FORGE_URL" \
-    || { echo "FAIL b3-live : installer download"; exit 1; }
-fi
-echo "$INSTALLER_SHA1  $B3_DIR/forge-installer.jar" | sha1sum -c - >/dev/null 2>&1 \
-  || { echo "FAIL b3-live : installer sha1 drift (want $INSTALLER_SHA1)"; exit 1; }
+# 2a. B3_DIR preflight (docker root-owned leftovers fail fast, loudly).
+live_preflight_dir "B3_DIR" "$B3_DIR"
+live_fetch "$B3_DIR/forge-installer.jar" "$FORGE_URL" "$INSTALLER_SHA1" "${B3_OFFLINE:-0}"
 UNI="$SERV/forge-1.7.10-10.13.4.1614-1.7.10-universal.jar"
-if [ ! -f "$UNI" ]; then
-  (cd "$SERV" && "$J8/java" -jar "$B3_DIR/forge-installer.jar" --installServer >/dev/null 2>&1) \
-    || { echo "FAIL b3-live : --installServer"; exit 1; }
-fi
+live_install_server "$SERV" "$B3_DIR/forge-installer.jar" "$J8"
 echo "$UNIVERSAL_SHA1  $UNI" | sha1sum -c - >/dev/null 2>&1 \
   || { echo "FAIL b3-live : universal sha1 drift (want $UNIVERSAL_SHA1)"; exit 1; }
 ASM=$(find "$SERV/libraries/org/ow2/asm" -name "$ASM_PIN" | head -n 1)
@@ -179,10 +160,6 @@ echo "ok b3-live : server provisioned (pins verified)"
 #     The obf name below is 1614-pinned bytes like the universal sha1
 #     above: aji takes String and returns aji, the getBlockFromName shape,
 #     so aji is Block here.)
-pin_uni() {
-  "$J8/javap" -p -cp "$UNI" "$1" 2>/dev/null | grep -q "$2" \
-    || { echo "FAIL b3-live : universal pin unmet <$1 :: $2>"; exit 1; }
-}
 pin_uni 'cpw.mods.fml.common.gameevent.TickEvent$WorldTickEvent' 'world'
 pin_uni 'cpw.mods.fml.common.gameevent.TickEvent$ClientTickEvent' 'ClientTickEvent('
 pin_uni 'cpw.mods.fml.common.gameevent.TickEvent$ServerTickEvent' 'ServerTickEvent('
@@ -266,37 +243,6 @@ cat > "$BLD/mcmod.info" <<EOF
 [{"modid": "matoubridge", "name": "MatouBridge", "description": "SPI bridge for Minecraft 1.7.10 (reobfuscated SRG).", "version": "$VERSION", "mcversion": "1.7.10", "authorList": ["matou-dev"], "url": "https://github.com/matou-dev/bridge-1710"}, {"modid": "example1", "name": "MatouExample1", "description": "Example1 content: registers example1 blocks (preInit) for the bridge wire.", "version": "$VERSION", "mcversion": "1.7.10", "authorList": ["matou-dev"], "url": "https://github.com/matou-dev/example1"}]
 EOF
 find "$BLD/spi" "$BLD/ex1" "$BLD/mini" "$BLD/forge" "$BLD/MANIFEST.MF" "$BLD/mcmod.info" -exec touch -h -d "@$EPOCH" {} +
-# mkjar: sorted entries, pinned mtimes, VERSION manifest. File lists stay
-# explicit because jar -C . walks in readdir order (not reproducible).
-# normjar then clamps every zip entry timestamp: the JDK 8 jar tool stamps
-# META-INF entries with the wall clock (verified by diff), and Reobf does
-# the same for its output. python3 is already a hard dependency (anvil).
-# Scope: same commit + same toolchain == same bytes (zlib/JDK may vary
-# across machines; use tools/live/Dockerfile to pin the toolchain).
-normjar() {
-  python3 - "$1" "$EPOCH" <<'EOF'
-import sys, zipfile, datetime
-path, epoch = sys.argv[1], int(sys.argv[2])
-dt = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).timetuple()[:6]
-zin = zipfile.ZipFile(path)
-items = [(i, zin.read(i.filename)) for i in zin.infolist()]
-zin.close()
-zout = zipfile.ZipFile(path + ".norm", "w", zipfile.ZIP_DEFLATED)
-for info, data in items:
-    info.date_time = dt
-    info.create_system = 0
-    zout.writestr(info, data)
-zout.close()
-EOF
-  mv "$1.norm" "$1"
-}
-mkjar() {
-  out="$1"; stage="$2"
-  files=$(cd "$stage" && find . -type f | LC_ALL=C sort)
-  # Controlled tree, no spaces in class paths: word-splitting is intended.
-  (cd "$stage" && "$J8/jar" cfm "$out" "$BLD/MANIFEST.MF" $files)
-  normjar "$out"
-}
 mkjar "$BLD/jars/matou-spi.jar" "$BLD/spi"
 mkjar "$BLD/jars/matou-example1.jar" "$BLD/ex1"
 mkjar "$BLD/jars/matou-minimap.jar" "$BLD/mini"
@@ -385,25 +331,13 @@ cp tools/live/my_beast.geo.json "$SERV/config/matoubridge/my_beast.geo.json"
 echo "eula=true" > "$SERV/eula.txt"
 printf 'online-mode=false\nlevel-type=FLAT\ngamemode=1\ndifficulty=0\nmotd=B3 live proof\nmax-tick-time=-1\n' > "$SERV/server.properties"
 rm -rf "$SERV/world" "$SERV/logs"
-set +e
-(cd "$SERV" && timeout "$BOOT_SECS" "$J8/java" -Xmx1G -jar "$UNI" nogui < /dev/null > boot-b3.log 2>&1)
-code=$?
-set -e
-[ "$code" -eq 124 ] || { echo "FAIL b3-live : server exited early (code $code, see $SERV/boot-b3.log)"; exit 1; }
-echo "ok b3-live : server ran ($BOOT_SECS s)"
+live_boot "$SERV" "$BOOT_SECS" "boot-b3.log" "$J8/java" -Xmx1G -jar "$UNI" nogui
 
 # 6. Fail loudly on any runtime refusal or linkage error. E_MODEL rides
 # here since the model tranche (same as 1122: the server ignores the geo
 # cleanly, any server-side model refusal fails loudly instead of passing
 # silently).
-if grep -a -q "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|Encountered an unexpected exception" "$SERV/boot-b3.log"; then
-  echo "FAIL b3-live : runtime refusal (see $SERV/boot-b3.log)"
-  grep -a -m5 "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|Caused by" "$SERV/boot-b3.log"
-  exit 1
-fi
-grep -a -q "matoubridge" "$SERV/boot-b3.log" \
-  || { echo "FAIL b3-live : mod never loaded"; exit 1; }
-echo "ok b3-live : bind clean, ticks clean"
+live_verdict "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|Encountered an unexpected exception" "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|Caused by" "$SERV/boot-b3.log"
 
 # 7. Positive proof: world blocks in chunks (0..1, -1..1) at y=60..61
 #    plus y=63..65 must equal the pure decision union — nothing foreign,
@@ -422,70 +356,5 @@ echo "ok b3-live : bind clean, ticks clean"
 ORE_ID=$(grep -a -o '\[MatouBridge\] registered <example1:my_ore> id [0-9][0-9]*' "$SERV/boot-b3.log" | tail -n 1 | grep -a -o '[0-9][0-9]*$' || true)
 [ -n "$ORE_ID" ] || { echo "FAIL b3-live : my_ore registration line absent from boot log (preInit never registered? see $SERV/boot-b3.log)"; exit 1; }
 echo "ok b3-live : my_ore id $ORE_ID (dynamic, from boot log)"
-: > "$BLD/world.txt"
-for spec in "r.0.0.mca 0 0" "r.0.0.mca 1 0" "r.0.0.mca 0 1" \
-    "r.0.0.mca 1 1" "r.0.-1.mca 0 -1" "r.0.-1.mca 1 -1"; do
-  set -- $spec
-  for y in 60 61 63 64 65; do
-    python3 tools/live/anvil.py "$SERV/world/region/$1" "$2" "$3" "$y" \
-      | awk -v cx="$2" -v cz="$3" -v y="$y" \
-        '{split($1, a, ","); print (cx*16+a[1])" "y" "(cz*16+a[2])" "$2}' \
-      >> "$BLD/world.txt"
-  done
-done
-python3 - "$BLD/union.txt" "$BLD/world.txt" "$SERV/config/matoubridge/packs.cfg" "minecraft:stone=1,example1:my_ore=$ORE_ID" <<'EOF'
-import sys
-# Block names resolve to numeric IDs through the argv table (frozen
-# vanilla IDs plus the dynamic custom IDs the shell resolved from the
-# boot log) — never hardcoded, never guessed. A world name outside the
-# table fails loudly (extend the table explicitly).
-table = {}
-for pair in sys.argv[4].split(","):
-    name, num = pair.split("=", 1)
-    table[name] = num
-wire_y, wire_block = None, None
-for line in open(sys.argv[3]):
-    line = line.strip()
-    if line and not line.startswith("#"):
-        toks = line.split()
-        wire_y, wire_block = int(toks[1]), toks[2]
-if wire_y is None:
-    print("FAIL b3-live : no wire in packs.cfg")
-    sys.exit(1)
-if wire_block not in table:
-    print("FAIL b3-live : no numeric ID for wire block <%s>" % wire_block)
-    sys.exit(1)
-u = {}
-for line in open(sys.argv[1]):
-    cell = line.split()[0]
-    parts = cell.split(",")
-    if len(parts) == 3 and ":" in parts[2]:
-        z, bname = parts[2].split(":", 1)
-        pos = (int(parts[0]), int(parts[1]), int(z))
-    else:
-        x, z = cell.split(",")
-        pos, bname = (int(x), wire_y, int(z)), wire_block
-    if bname not in table:
-        print("FAIL b3-live : no numeric ID for block <%s> (extend the table, never guess)" % bname)
-        sys.exit(1)
-    u[pos] = table[bname]
-rows = [l.split() for l in open(sys.argv[2])]
-w = {(int(x), int(y), int(z)): i for x, y, z, i in rows}
-if not w:
-    print("FAIL b3-live : world empty at y=60..61,63..65 (no tick applied?)")
-    sys.exit(1)
-if set(w.values()) - set(table.values()):
-    print("FAIL b3-live : foreign block ids %s" % sorted(set(w.values()) - set(table.values())))
-    sys.exit(1)
-bad = {p: (w[p], u.get(p)) for p in w if u.get(p) != w[p]}
-if bad:
-    print("FAIL b3-live : id mismatch at %s (want pure union ids)" % sorted(bad.items())[:5])
-    sys.exit(1)
-if set(w) - set(u):
-    print("FAIL b3-live : world cells outside pure union %s" % sorted(set(w) - set(u))[:5])
-    sys.exit(1)
-if set(u) - set(w):
-    print("FAIL b3-live : pure cells missing from world (%d)" % len(set(u) - set(w)))
-    sys.exit(1)
-print("ok b3-live : world == pure union (%d cells, ids %s)" % (len(w), ",".join(sorted(set(w.values())))))
-EOF
+live_anvil_loop "$SERV" "$BLD"
+live_compare_ids "$BLD/union.txt" "$BLD/world.txt" "$SERV/config/matoubridge/packs.cfg" "minecraft:stone=1,example1:my_ore=$ORE_ID"
