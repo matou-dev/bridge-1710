@@ -4,7 +4,9 @@ import fr.iamacat.bridge.Packs.PackSpec;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * T2 operator overrides (hub decisions/SPAWN.md operator-override
@@ -170,6 +172,44 @@ public final class OperatorPolicy {
                     + e + "> (want > 0, content or override)");
         }
         return e;
+    }
+
+    /**
+     * Effective items per harvest per kind: content counts with the
+     * operator win applied uniformly (hub {@code decisions/LOOT.md},
+     * distinct-drops tranche — the {@code loot.count} key stays
+     * global, so a present win pays every kind alike, else each kind
+     * keeps its content number; per-kind loot operator keys stay a
+     * named follow-up, never a quiet suffix here).
+     *
+     * @param content harvest kind to content count (positive entries).
+     * @throws NullPointerException when content or specs is null.
+     * @throws IllegalArgumentException on bad/multi/unknown operator
+     *         values or a non-positive merge — never defaulted.
+     */
+    public static Map<String, Long> effectiveLootCounts(
+            Map<String, Long> content, List<PackSpec> specs) {
+        if (content == null) {
+            throw new NullPointerException("E_LOOT_WIRE:null content");
+        }
+        if (specs == null) {
+            throw new NullPointerException("E_LOOT_WIRE:null specs");
+        }
+        rejectUnknownLoot(specs);
+        Long o = positive(specs, LOOT_COUNT, "E_LOOT_WIRE");
+        Map<String, Long> effective = new LinkedHashMap<String, Long>();
+        for (Map.Entry<String, Long> e : content.entrySet()) {
+            long count = e.getValue() == null ? -1L
+                    : e.getValue().longValue();
+            long merged = o != null ? o.longValue() : count;
+            if (merged <= 0) {
+                throw new IllegalArgumentException("E_LOOT_WIRE:range <"
+                        + e.getKey() + " count=" + merged
+                        + "> (want > 0, content or override)");
+            }
+            effective.put(e.getKey(), Long.valueOf(merged));
+        }
+        return Collections.unmodifiableMap(effective);
     }
 
     /**

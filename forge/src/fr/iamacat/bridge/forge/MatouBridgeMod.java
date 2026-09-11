@@ -83,13 +83,14 @@ import net.minecraftforge.event.world.BlockEvent;
  * {@code decisions/SPI_STATE_VOCABULARY.md}) and the pure pack-served
  * loot job decides what drops. The ore scope is the packs.cfg wire-block column (T2
  * operator-override tranche, hub decisions/SPAWN.md — no bridge constant
- * names a loot block); the per-harvest count is the content
- * {@code drop_count} unless the operator {@code loot.count} wins. Due
+ * names a loot block); each kind seals its content {@code drop_count}
+ * unless the operator {@code loot.count} wins uniformly
+ * (distinct-drops tranche, hub decisions/LOOT.md — the ore kind pays
+ * the first sealed mob, each {@code beast.<mob>} kind pays its mob). Due
  * drops land as {@link EntityItem} carriers beside the
  * vanilla drops (vanilla behaviour untouched). The carrier is vanilla
  * diamond until item registration lands on the REGISTRATION path; every
- * dim-0 kill pays the single table entry (per-mob filtering is a
- * re-opener, never a quiet filter — hub decisions/LOOT.md). New refusals stay loot-local ({@code E_LOOT_*},
+ * dim-0 kill pays through the per-mob table (hub decisions/LOOT.md). New refusals stay loot-local ({@code E_LOOT_*},
  * never in the {@code E_FORGE_*} parity catalog), so bridge parity holds
  * with behaviour intentionally 1710-only until proven.
  *
@@ -181,10 +182,23 @@ public final class MatouBridgeMod {
      * transports it into the hook, it never owns a combat number. */
     private final LinkedHashMap<String, Double> combatReach =
             new LinkedHashMap<String, Double>();
-    /** Loot policy, sealed from the content table at wire time unless
-     * the operator {@code loot.count} wins (operator-override tranche):
-     * effective items per harvest. Transported, never owned. */
-    private long lootCount;
+    /** Loot policy, sealed per kind from the content table at wire time
+     * unless the operator {@code loot.count} wins uniformly
+     * (distinct-drops tranche, hub decisions/LOOT.md): effective items
+     * per harvest by harvest kind (the ore kind plus one
+     * {@code beast.<mob>} kind per sealed mob). Transported, never
+     * owned. */
+    private final LinkedHashMap<String, Long> lootCounts =
+            new LinkedHashMap<String, Long>();
+    /** Beast harvest kinds by short mob name, in seal order
+     * (distinct-drops tranche): the kill hook records the victim's mob
+     * identity through this map. */
+    private final LinkedHashMap<String, String> lootBeastKinds =
+            new LinkedHashMap<String, String>();
+    /** Sealed loot mobs, short names in file order (the ore harvest and
+     * non-beast kills pay the first — same first-mob rule as the
+     * content builders). */
+    private final List<String> lootMobs = new ArrayList<String>();
 
     private final List<PackWire> wires = new ArrayList<PackWire>();
     private final MinedStore mined = new MinedStore();
@@ -196,7 +210,6 @@ public final class MatouBridgeMod {
     private Block stone;
     private Map<String, String> lootTable;
     private String oreKind;
-    private String beastKind;
     private StateVocabulary lootVocab;
     /** First sealed qualified mob ref (null when passive — Q1
      * cohabitation): the hooks gate on {@link #spawnMobs} being empty
@@ -293,10 +306,13 @@ public final class MatouBridgeMod {
     /**
       * Loot wiring: one table per bridge from the first wire's pack policy
       * (parsed once at pack wire time, like registration — never on the
-      * tick path), the content {@code drop_count} unless the operator
-      * {@code loot.count} wins, and the ore scope from the operator
-      * wire-block column (T2 operator-override tranche — no bridge constant
-      * names a loot block). Harvest kinds come from the same policy (never
+      * tick path): the ore kind pays the first sealed mob, one
+      * {@code beast.<mob>} kind per sealed mob pays that mob (hub
+      * decisions/LOOT.md distinct-drops tranche), each kind sealing its
+      * content {@code drop_count} unless the operator {@code loot.count}
+      * wins uniformly, plus the ore scope from the operator wire-block
+      * column (T2 operator-override tranche — no bridge constant names a
+      * loot block). Harvest kinds come from the same policy (never
       * content literals here): a table missing a served kind refuses
       * loudly — an unpaid kind would be a silent no-drop. No owned file
       * anywhere means loot stays passive (Q1 cohabitation): the hooks gate
@@ -322,17 +338,31 @@ public final class MatouBridgeMod {
         lootVocab = vocabulary(LootStates.SCOPE, "E_LOOT_SEAL");
         PolicyPack policy = policy("E_LOOT_POLICY");
         oreKind = policy.lootOreKind();
-        beastKind = policy.lootBeastKind();
-        lootTable = policy.lootDrops();
-        if (!lootTable.containsKey(oreKind)
-                || !lootTable.containsKey(beastKind)) {
-            throw new IllegalArgumentException("E_LOOT_TABLE:kind <"
-                    + new ArrayList<String>(lootTable.keySet())
-                    + "> (want <" + oreKind + "> + <" + beastKind + ">)");
+        lootMobs.addAll(policy.lootMobs());
+        lootTable = new LinkedHashMap<String, String>();
+        lootTable.put(oreKind, policy.lootDrop(lootMobs.get(0)));
+        Map<String, Long> contentCounts =
+                new LinkedHashMap<String, Long>();
+        contentCounts.put(oreKind,
+                Long.valueOf(policy.lootCount(lootMobs.get(0))));
+        for (String mob : lootMobs) {
+            String kind = policy.lootBeastKind(mob);
+            lootBeastKinds.put(mob, kind);
+            lootTable.put(kind, policy.lootDrop(mob));
+            contentCounts.put(kind,
+                    Long.valueOf(policy.lootCount(mob)));
+        }
+        for (String kind : lootBeastKinds.values()) {
+            if (!lootTable.containsKey(oreKind)
+                    || !lootTable.containsKey(kind)) {
+                throw new IllegalArgumentException("E_LOOT_TABLE:kind <"
+                        + new ArrayList<String>(lootTable.keySet())
+                        + "> (want <" + oreKind + "> + <" + kind + ">)");
+            }
         }
         loot = policy.lootJob();
-        lootCount = OperatorPolicy.effectiveLootCount(policy.lootCount(),
-                specs);
+        lootCounts.putAll(OperatorPolicy.effectiveLootCounts(
+                contentCounts, specs));
         for (String name : OperatorPolicy.wireBlocks(specs)) {
             Block block = Block.getBlockFromName(name);
             if (block == null) {
@@ -346,7 +376,7 @@ public final class MatouBridgeMod {
                 OperatorPolicy.LOOT_COUNT) ? " overridden <loot.count>"
                 : "";
         System.out.println("[MatouBridge] loot wired <" + lootTable
-                + "> count <" + lootCount + "> ore <" + oreNames + ">"
+                + "> count <" + lootCounts + "> ore <" + oreNames + ">"
                 + lootNote);
         for (String dropRef : lootTable.values()) {
             if (resolveItem(dropRef) == null) {
@@ -633,10 +663,15 @@ public final class MatouBridgeMod {
     }
 
     /**
-     * Loot record: a server-side dim-0 mob kill becomes a beast harvest
-     * at the entity's block coords. Single-table scope (hub
-     * decisions/LOOT.md): every kill pays the one entry — per-mob
-     * filtering is a re-opener, never a quiet filter here.
+     * Loot record: a server-side dim-0 mob kill becomes a per-mob beast
+     * harvest at the entity's block coords (hub decisions/LOOT.md
+     * distinct-drops tranche): a registered beast pays its own mob's
+     * {@code beast.<mob>} kind through its NBT identity (legacy saves
+     * adopt the first sealed mob, same rule as combat), any other kill
+     * pays the first sealed mob — the T1 any-kill-pays scope survives
+     * per-mob, never a quiet filter here. (The census species narrowed
+     * with custom-entity registration; the companion kills registered
+     * beasts.)
      *
      * <p>Owner discipline (measured live: NoSuchFieldError worldObj):
      * reobf only walks in-jar superclass chains, and stub supertypes
@@ -664,10 +699,18 @@ public final class MatouBridgeMod {
         if (body.worldObj.provider.dimensionId != 0) {
             return;
         }
+        String victim = body instanceof MatouEntity
+                ? ((MatouEntity) body).mobOrFirst() : lootMobs.get(0);
+        String kind = lootBeastKinds.get(victim);
+        if (kind == null) {
+            throw new IllegalArgumentException("E_LOOT_TABLE:kind <"
+                    + victim + "> (want one of " + lootBeastKinds.keySet()
+                    + " — sealed mobs only, never defaulted)");
+        }
         int x = (int) Math.floor(body.posX);
         int y = (int) Math.floor(body.posY);
         int z = (int) Math.floor(body.posZ);
-        String harvest = Cell.of(x, y, z, beastKind).render();
+        String harvest = Cell.of(x, y, z, kind).render();
         drops.record(harvest, tick);
         System.out.println("[MatouBridge] loot recorded <" + harvest
                 + "> at tick " + tick);
@@ -1068,7 +1111,7 @@ public final class MatouBridgeMod {
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>(
                 wires.get(0).states(now));
         states.putAll(LootSeal.seal(lootVocab, drops, lootTable,
-                lootCount));
+                lootCounts));
         Snapshot snap = ForgeSnapshot.snapshot(now, states);
         List<String> due = loot.decide(snap);
         for (String cell : due) {
@@ -1096,8 +1139,15 @@ public final class MatouBridgeMod {
         for (String harvest : claimed) {
             int cut = harvest.indexOf(':');
             String head = harvest.substring(0, cut);
-            String item = lootTable.get(harvest.substring(cut + 1));
-            for (long c = 0; c < lootCount; c++) {
+            String kind = harvest.substring(cut + 1);
+            String item = lootTable.get(kind);
+            Long count = lootCounts.get(kind);
+            if (item == null || count == null) {
+                throw new IllegalStateException("E_LOOT_SEAL:diverged <"
+                        + harvest + "> (unpaid kind — never a silent "
+                        + "no-drop)");
+            }
+            for (long c = 0; c < count.longValue(); c++) {
                 out.add(head + ":" + item);
             }
         }

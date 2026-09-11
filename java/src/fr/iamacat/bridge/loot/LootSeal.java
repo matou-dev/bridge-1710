@@ -27,17 +27,22 @@ public final class LootSeal {
 
     /**
      * Seal view for one tick: harvests (harvest to harvest tick) plus
-     * table (kind to content item ref) plus count (items per harvest) —
+     * table (kind to content item ref) plus counts (kind to authorial
+     * items per due harvest, one positive entry per table kind — the
+     * ore kind plus one {@code beast.<mob>} kind per sealed mob since
+     * the distinct-drops tranche, hub {@code decisions/LOOT.md}) —
      * roles resolved through {@code vocab} in seal order, so live and
      * verdict replay agree. The forge side serves the pack's vocabulary
      * at wire time (parse-once, never on the tick path).
      *
-     * @throws NullPointerException when vocab, store or table is null.
-     * @throws IllegalArgumentException when count is not positive or the
-     *         vocabulary carries no loot roles.
+     * @throws NullPointerException when vocab, store, table or counts
+     *         is null.
+     * @throws IllegalArgumentException when any count is not positive
+     *         or the vocabulary carries no loot roles.
      */
     public static Map<MatouId, Object> seal(StateVocabulary vocab,
-            DropStore store, Map<String, String> table, long count) {
+            DropStore store, Map<String, String> table,
+            Map<String, Long> counts) {
         if (vocab == null) {
             throw new NullPointerException(
                     "E_LOOT_SEAL:null vocabulary");
@@ -48,15 +53,22 @@ public final class LootSeal {
         if (table == null) {
             throw new NullPointerException("E_LOOT_SEAL:null table");
         }
-        if (count <= 0) {
-            throw new IllegalArgumentException(
-                    "E_LOOT_SEAL:range <" + count + "> (want > 0)");
+        if (counts == null) {
+            throw new NullPointerException("E_LOOT_SEAL:null counts");
+        }
+        for (Map.Entry<String, Long> e : counts.entrySet()) {
+            if (e.getValue() == null || e.getValue().longValue() <= 0L) {
+                throw new IllegalArgumentException(
+                        "E_LOOT_SEAL:range <" + e.getKey() + " -> "
+                                + e.getValue() + "> (want > 0)");
+            }
         }
         Map<MatouId, Object> states = new LinkedHashMap<MatouId, Object>();
         states.put(LootStates.harvested(vocab), store.sealed());
         states.put(LootStates.table(vocab), Collections.unmodifiableMap(
                 new LinkedHashMap<String, String>(table)));
-        states.put(LootStates.count(vocab), Long.valueOf(count));
+        states.put(LootStates.count(vocab), Collections.unmodifiableMap(
+                new LinkedHashMap<String, Long>(counts)));
         return states;
     }
 }

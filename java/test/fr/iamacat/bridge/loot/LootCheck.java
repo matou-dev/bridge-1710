@@ -24,14 +24,6 @@ import java.util.Map;
  * sealed states stay equal up to the table expansion). Any violation
  * prints {@code FAIL spike-loot : ...} and exits 1. Run by tools/check.sh
  * etage 1. Zero Minecraft.
- *
- * <p>Distinct-drops oracle backport (hub {@code decisions/LOOT.md}):
- * the oracles read the per-mob loot content, the seals stay single-kind
- * (this bridge wires no per-mob table yet — its forge loot path keeps
- * refusing the multi-mob content loudly through the sole-view policy,
- * which is the dispatch-port rationale, never a silent pass). The pure
- * job sections seal per-kind snapshots by hand beside this bridge's
- * long-form {@link LootSeal}.
  */
 public final class LootCheck {
     private LootCheck() {}
@@ -73,21 +65,12 @@ public final class LootCheck {
                 "../example1/content/owned.matou");
     }
 
-    /** Per-kind wire table served by the content builders. */
     private static Map<String, String> table() {
         return loot().dropsPerKind();
     }
 
-    /** Per-kind authorial counts served by the content builders. */
     private static Map<String, Long> tableCounts() {
         return loot().countsPerKind();
-    }
-
-    /** Single-kind slice for this bridge's long-form seal. */
-    private static Map<String, String> oreSlice() {
-        Map<String, String> slice = new LinkedHashMap<String, String>();
-        slice.put(LootJob.ORE, loot().drop("my_beast"));
-        return slice;
     }
 
     private static StateVocabulary vocab() {
@@ -97,19 +80,10 @@ public final class LootCheck {
         return new ExamplePack().vocabulary(LootStates.SCOPE);
     }
 
-    private static Snapshot snap(DropStore store,
-            Map<String, String> wires, Map<String, Long> counts,
-            long tick) {
-        Map<MatouId, Object> states =
-                new LinkedHashMap<MatouId, Object>();
-        states.put(LootJob.HARVESTED, store.sealed());
-        states.put(LootJob.TABLE, wires);
-        states.put(LootJob.COUNT, counts);
-        return ForgeSnapshot.snapshot(tick, states);
-    }
-
     private static Snapshot seal(DropStore store, long tick) {
-        return snap(store, table(), tableCounts(), tick);
+        Map<MatouId, Object> states =
+                LootSeal.seal(vocab(), store, table(), tableCounts());
+        return ForgeSnapshot.snapshot(tick, states);
     }
 
     private static DropStore seeded() {
@@ -159,20 +133,44 @@ public final class LootCheck {
         return out;
     }
 
+    /**
+     * Forge wire shape: the per-mob table the forge loot wire builds
+     * from the pack-served per-mob policy (ore pays the first sealed
+     * mob, one beast kind per mob) — the gate holds it equal to the
+     * content builders, so the wire and the oracles share one rule.
+     */
+    private static Map<String, String> wiredTable(LootTable content) {
+        List<String> mobs = new ArrayList<String>(content.mobs());
+        Map<String, String> wired = new LinkedHashMap<String, String>();
+        wired.put(LootJob.ORE, content.drop(mobs.get(0)));
+        for (String mob : mobs) {
+            wired.put(LootJob.beastKind(mob), content.drop(mob));
+        }
+        return wired;
+    }
+
+    private static Map<String, Long> wiredCounts(LootTable content) {
+        List<String> mobs = new ArrayList<String>(content.mobs());
+        Map<String, Long> wired = new LinkedHashMap<String, Long>();
+        wired.put(LootJob.ORE,
+                Long.valueOf(content.count(mobs.get(0))));
+        for (String mob : mobs) {
+            wired.put(LootJob.beastKind(mob),
+                    Long.valueOf(content.count(mob)));
+        }
+        return wired;
+    }
+
     public static void main(String[] args) {
         LootJob job = new LootJob();
 
-        // Per-mob oracles over the sibling content (distinct drops:
-        // ore pays the first sealed mob, each beast kind pays its mob
-        // with its authorial count). The sole-view legacy refuses the
-        // multi-mob table — that refusal is the dispatch-port
-        // rationale: this bridge's forge loot path stays single-kind
-        // until its port lands.
+        // Table wires from the sibling content (distinct per-mob drops:
+        // ore pays the first sealed mob, each beast kind pays its mob,
+        // each kind seals its authorial count — the gate proves the
+        // content-decided numbers ride the seal, never a bridge
+        // constant).
         Map<String, String> wires = table();
         Map<String, Long> wired = tableCounts();
-        check(new ArrayList<String>(loot().mobs()).equals(
-                Arrays.asList("my_beast", "my_brute")),
-                "table seals both mobs in file order");
         check(wires.size() == 3, "table wires 3 kinds");
         check("example1.content:my_gem".equals(wires.get(LootJob.ORE)),
                 "table ore pays first mob gem");
@@ -188,12 +186,9 @@ public final class LootCheck {
                 && wired.get(LootJob.beastKind("my_brute")).longValue()
                         == 2L,
                 "table wires authorial counts per kind");
-        expectIAE(new Runnable() {
-            @Override public void run() { loot().drops(); }
-        }, "sole-view drops on multi");
-        expectIAE(new Runnable() {
-            @Override public void run() { loot().count(); }
-        }, "sole-view count on multi");
+        check(wiredTable(loot()).equals(wires)
+                && wiredCounts(loot()).equals(wired),
+                "forge wire shape equals content builders");
 
         // Store: record then claim on both sides of the boundary.
         DropStore store = new DropStore();
@@ -248,73 +243,97 @@ public final class LootCheck {
             @Override public void run() { job.decide(bare); }
         }, "missing loot ids");
 
-        // Seal: this bridge's long-form seal over a single-kind slice
-        // (contents, copy isolation, refusals — the forge loot path
-        // keeps this shape until its port).
-        Map<String, String> slice = oreSlice();
+        // Seal: contents, copy isolation, refusals (the helper above
+        // routes through the shipped LootSeal, so every assertion below
+        // exercises the live path).
         Map<MatouId, Object> st = LootSeal.seal(vocab(), seeded(),
-                slice, 1L);
+                wires, tableCounts());
         check(st.get(LootJob.HARVESTED) instanceof Map,
                 "seal carries example1.loot:harvested");
-        check(slice.equals(st.get(LootJob.TABLE)),
+        check(wires.equals(st.get(LootJob.TABLE)),
                 "seal carries example1.loot:table");
-        check(Long.valueOf(1L).equals(st.get(LootJob.COUNT)),
+        check(tableCounts().equals(st.get(LootJob.COUNT)),
                 "seal carries example1.loot:count");
         check(new ArrayList<MatouId>(st.keySet()).equals(Arrays.asList(
                 LootJob.HARVESTED, LootJob.TABLE, LootJob.COUNT)),
                 "seal keys follow the vocabulary order");
         DropStore iso = new DropStore();
         iso.record("1,2,3:" + LootJob.ORE, 5L);
-        Map<MatouId, Object> snap0 = LootSeal.seal(vocab(), iso, slice,
-                1L);
+        Map<MatouId, Object> snap0 = LootSeal.seal(vocab(), iso, wires,
+                tableCounts());
         iso.record("9,9,9:" + LootJob.beastKind("my_brute"), 6L);
         check(((Map<?, ?>) snap0.get(LootJob.HARVESTED)).size() == 1,
                 "sealed harvests are a copy, later records never leak");
-        Map<String, String> mut = new LinkedHashMap<String, String>(slice);
+        Map<String, String> mut = new LinkedHashMap<String, String>(wires);
         Map<MatouId, Object> snapT = LootSeal.seal(vocab(), seeded(),
-                mut, 1L);
+                mut, tableCounts());
         mut.put(LootJob.ORE, "example1.content:nope");
-        check(slice.equals(snapT.get(LootJob.TABLE)),
+        check(wires.equals(snapT.get(LootJob.TABLE)),
                 "sealed table is a copy, later edits never leak");
+        Map<String, Long> mutCounts =
+                new LinkedHashMap<String, Long>(tableCounts());
+        Map<MatouId, Object> snapC = LootSeal.seal(vocab(), seeded(),
+                wires, mutCounts);
+        mutCounts.put(LootJob.ORE, Long.valueOf(9L));
+        check(tableCounts().equals(snapC.get(LootJob.COUNT)),
+                "sealed counts are a copy, later edits never leak");
         final DropStore nullStore = null;
         expectNPE(new Runnable() {
             @Override public void run() {
-                LootSeal.seal(null, nullStore, slice, 1L);
+                LootSeal.seal(null, nullStore, table(), tableCounts());
             }
         }, "null vocabulary");
         expectNPE(new Runnable() {
             @Override public void run() {
-                LootSeal.seal(vocab(), nullStore, slice, 1L);
+                LootSeal.seal(vocab(), nullStore, table(), tableCounts());
             }
         }, "null store");
         expectNPE(new Runnable() {
             @Override public void run() {
-                LootSeal.seal(vocab(), seeded(), null, 1L);
+                LootSeal.seal(vocab(), seeded(), null, tableCounts());
             }
         }, "null table");
+        expectNPE(new Runnable() {
+            @Override public void run() {
+                LootSeal.seal(vocab(), seeded(), table(), null);
+            }
+        }, "null counts");
         expectIAE(new Runnable() {
             @Override public void run() {
-                LootSeal.seal(vocab(), seeded(), slice, 0L);
+                Map<String, Long> flat =
+                        new LinkedHashMap<String, Long>(tableCounts());
+                flat.put(LootJob.ORE, Long.valueOf(0L));
+                LootSeal.seal(vocab(), seeded(), table(), flat);
             }
         }, "zero count");
         final StateVocabulary foreign =
                 new ExamplePack().vocabulary(SpawnStates.SCOPE);
         expectIAE(new Runnable() {
             @Override public void run() {
-                LootSeal.seal(foreign, seeded(), slice, 1L);
+                LootSeal.seal(foreign, seeded(), table(), tableCounts());
             }
         }, "spawn vocabulary into loot seal");
 
         // Comparateur: store claim expanded by the table equals the job
         // decision tick by tick over the same sealed states (same order,
-        // same boundary).
+        // same boundary), at content counts and at overridden x2.
         for (long tick = 95L; tick <= 115L; tick += 5L) {
             List<String> viaStore = seeded().claimDue(tick);
-            List<String> viaJob = job.decide(snap(seeded(), wires,
-                    wired, tick));
+            Map<MatouId, Object> states =
+                    LootSeal.seal(vocab(), seeded(), wires, wired);
+            List<String> viaJob = job.decide(
+                    ForgeSnapshot.snapshot(tick, states));
             check(viaJob.equals(expand(viaStore, wires, wired)),
                     "store claim == job decision at tick " + tick);
         }
+        Map<String, Long> doubled = new LinkedHashMap<String, Long>();
+        for (Map.Entry<String, Long> e : wired.entrySet()) {
+            doubled.put(e.getKey(), Long.valueOf(2L));
+        }
+        List<String> viaDoubled = job.decide(ForgeSnapshot.snapshot(
+                110L, LootSeal.seal(vocab(), seeded(), wires, doubled)));
+        check(viaDoubled.equals(expand(seeded().claimDue(110L), wires,
+                doubled)), "store claim == job decision overridden x2");
 
         // Operator overrides (T2, hub decisions/SPAWN.md): absent means
         // content, present wins, bad refuses loudly — the same rule the
@@ -328,6 +347,33 @@ public final class LootCheck {
         check(OperatorPolicy.effectiveLootCount(contentCount,
                 specs(spec("example1:my_ore", "loot.count", "2"))) == 2L,
                 "operator loot.count wins over content");
+        Map<String, Long> contentCounts = tableCounts();
+        check(OperatorPolicy.effectiveLootCounts(contentCounts,
+                specs(spec("example1:my_ore"))).equals(contentCounts),
+                "operator absent means content counts per kind");
+        Map<String, Long> won = OperatorPolicy.effectiveLootCounts(
+                contentCounts,
+                specs(spec("example1:my_ore", "loot.count", "2")));
+        check(won.size() == 3 && won.get(LootJob.ORE).longValue() == 2L
+                && won.get(LootJob.beastKind("my_brute")).longValue()
+                        == 2L,
+                "operator loot.count wins uniformly per kind");
+        DropStore cs = new DropStore();
+        cs.record("8,10,8:" + LootJob.ORE, 100L);
+        cs.record("12,10,8:" + LootJob.beastKind("my_beast"), 110L);
+        cs.record("14,10,8:" + LootJob.beastKind("my_brute"), 110L);
+        Map<MatouId, Object> overStates =
+                LootSeal.seal(vocab(), cs, wires, won);
+        check(job.decide(ForgeSnapshot.snapshot(110L, overStates)).equals(
+                expand(seeded().claimDue(110L), wires, won)),
+                "overridden counts seal and decide the x2 expansion");
+        final Map<String, Long> nullCounts = null;
+        expectNPE(new Runnable() {
+            @Override public void run() {
+                OperatorPolicy.effectiveLootCounts(nullCounts,
+                        specs(spec("example1:my_ore")));
+            }
+        }, "null content counts");
         List<String> one = OperatorPolicy.wireBlocks(
                 specs(spec("example1:my_ore")));
         check(one.size() == 1 && one.get(0).equals("example1:my_ore"),
