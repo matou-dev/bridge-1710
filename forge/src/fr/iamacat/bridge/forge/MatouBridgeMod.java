@@ -507,8 +507,9 @@ public final class MatouBridgeMod {
      * ray-test and scales the vanilla amount by the bone weakspot
      * multiplier (head 2x). Same fallback discipline (environmental /
      * glancing / non-beast keeps vanilla silently, corrupt attacker
-     * state refuses loudly out of SPI) and same non-goal (the vanilla
-     * BUG-042 pre-rejection stays vanilla).
+     * state refuses loudly out of the SPI constructors
+     * ({@code E_HIT_VEC:nan} / {@code E_HIT_DIR:zero})) and same
+     * non-goal (the vanilla BUG-042 pre-rejection stays vanilla).
      *
      * <p>1614-native spelling (measured via javap against the 1614
      * universal + srg-mcp.srg, never ported blind from 1122): the hurt
