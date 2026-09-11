@@ -1,7 +1,7 @@
 package net.minecraft.client;
 
 import net.minecraft.client.multiplayer.WorldClient;
-import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.world.WorldSettings;
 
 /**
@@ -18,8 +18,17 @@ import net.minecraft.world.WorldSettings;
  * <p>Renderer anchors are srg-mcp.srg-derived, never recalled (same
  * derive discipline as the 1122 narrow map): {@code theWorld} is the
  * WorldClient-typed field (SRG {@code field_71441_e}),
- * {@code renderViewEntity} is a field here (SRG {@code field_71451_h} —
- * the 1122 {@code getRenderViewEntity()} method does not exist on 1614),
+ * {@code renderViewEntity} is an EntityLivingBase-typed field (SRG
+ * {@code field_71451_h} — a field on 1614, the 1122
+ * {@code getRenderViewEntity()} method does not exist here; the
+ * EntityLivingBase descriptor is runtime truth measured via javap on the
+ * pinned vanilla primary ({@code bao.i} is {@code sv}, and the runtime
+ * deobfuscation data maps {@code sv} to EntityLivingBase — an
+ * Entity-typed fieldref dies with NoSuchFieldError at the first frame,
+ * found live). The renderer narrows it to Entity by cast (every member
+ * it reads is declared on Entity, so Reobf hits directly — a
+ * LivingBase-owned ref would walk off the stripped stubs and pass
+ * through to die linking).
  * {@code getMinecraft} is SRG {@code func_71410_x}. All pinned by
  * tools/run-live.sh. Class names are identical in searge and MCP, so the
  * WorldClient descriptor needs no mapping.
@@ -31,7 +40,7 @@ public class Minecraft {
     // discipline: stubs never ship, a WorldClient-owned ref walks nowhere
     // in Reobf and passes through to die linking live — 1122 fix 6988515).
     public WorldClient theWorld;
-    public Entity renderViewEntity;
+    public EntityLivingBase renderViewEntity;
 
     public static Minecraft getMinecraft() {
         return null;

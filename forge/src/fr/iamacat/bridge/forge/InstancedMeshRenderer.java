@@ -194,7 +194,13 @@ public final class InstancedMeshRenderer {
         if (mc == null || mc.theWorld == null) {
             return;
         }
-        Entity view = mc.renderViewEntity;
+        // 1614 truth: renderViewEntity is EntityLivingBase-typed (SRG
+        // field_71451_h, descriptor measured via javap on the pinned
+        // vanilla primary — never recalled). Narrow to Entity by cast:
+        // every member read below is declared on Entity, so Reobf hits
+        // the map directly (a LivingBase-owned ref would walk off the
+        // stripped stubs and pass through to die linking live).
+        Entity view = (Entity) mc.renderViewEntity;
         if (view == null) {
             return;
         }
