@@ -1,5 +1,8 @@
 package fr.iamacat.bridge.model;
 
+import fr.iamacat.bridge.Packs;
+import fr.iamacat.bridge.wire.OperatorPolicy;
+import fr.iamacat.example1.CombatTable;
 import fr.iamacat.spi.hit.BoneBox;
 import fr.iamacat.spi.hit.HitTester;
 import fr.iamacat.spi.hit.RayHit;
@@ -8,8 +11,11 @@ import fr.iamacat.spi.model.MatouModel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Gate ModelWireCheck: the bridge-side model wiring without MC — the
@@ -44,6 +50,7 @@ public final class ModelWireCheck {
         testShippedAsset();
         testTempRoundtrip();
         testRefusals();
+        testCombatReachOverride();
         System.out.println("ok model-wire-check : beast model wiring proven pure");
     }
 
@@ -99,5 +106,75 @@ public final class ModelWireCheck {
                 "E_MODEL_GEO:unreadable");
         assertThrows(() -> BeastModel.load("../example1/content/owned.matou"),
                 "E_MODEL_JSON:syntax");
+    }
+
+    private static Packs.PackSpec spec(String block, String... kv) {
+        Map<String, String> args = new LinkedHashMap<String, String>();
+        args.put("ownedFile", "o");
+        for (int i = 0; i < kv.length; i += 2) {
+            args.put(kv[i], kv[i + 1]);
+        }
+        return new Packs.PackSpec("fr.iamacat.example1.ExamplePack", 63,
+                block, args);
+    }
+
+    private static List<Packs.PackSpec> specs(Packs.PackSpec... ss) {
+        List<Packs.PackSpec> out = new ArrayList<Packs.PackSpec>();
+        for (Packs.PackSpec s : ss) {
+            out.add(s);
+        }
+        return out;
+    }
+
+    /**
+     * Combat reach-override battery (reach-override tranche, hub
+     * decisions/VIRTUAL_HITBOXES.md): absent means content, present
+     * wins, bad refuses loudly — the same rule the forge
+     * {@code wireCombat} consumes, exercised here through the shipped
+     * {@code OperatorPolicy}. Same shape as the spawn/loot batteries in
+     * {@code SpawnCheck}/{@code LootCheck}, no new gate.
+     */
+    private static void testCombatReachOverride() {
+        double content = CombatTable.fromFile(
+                "../example1/content/owned.matou").reach();
+        check(content == 4.0, "content reach is 4.0");
+        check(OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore"))) == 4.0,
+                "operator absent means content reach");
+        check(OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore", "combat.reach", "5.0")))
+                == 5.0, "operator combat.reach wins over content");
+        check(!OperatorPolicy.present(
+                specs(spec("example1:my_ore")),
+                OperatorPolicy.COMBAT_REACH),
+                "absent reach key is not present");
+        check(OperatorPolicy.present(
+                specs(spec("example1:my_ore", "combat.reach", "5.0")),
+                OperatorPolicy.COMBAT_REACH),
+                "present reach key is present");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore", "combat.reach", "0"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore", "combat.reach", "-1"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore", "combat.reach", "x"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore", "combat.reach", "NaN"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore", "combat.reach", "Infinity"))),
+                "E_COMBAT_WIRE:bad");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore", "combat.reach", "5.0"),
+                        spec("example1:my_ore", "combat.reach", "6.0"))),
+                "E_COMBAT_WIRE:multi");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
+                specs(spec("example1:my_ore", "combat.reah", "5.0"))),
+                "E_COMBAT_WIRE:unknown");
+        assertThrows(() -> OperatorPolicy.effectiveCombatReach(content,
+                null), "E_COMBAT_WIRE:null");
     }
 }

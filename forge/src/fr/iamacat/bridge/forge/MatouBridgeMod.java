@@ -382,9 +382,13 @@ public final class MatouBridgeMod {
      * the first wire's pack policy (parsed once at pack wire time, like
      * loot/spawn — never on the tick path). The table seals into the
      * bridge model holder the beast reads at hit time; the reach lands
-     * on the hook's ray-test cutoff. No owned file anywhere means
-     * combat stays passive (Q1 cohabitation): the seal stays empty and
-     * any hit-time read refuses loudly instead of defaulting 1.0x.
+     * on the hook's ray-test cutoff — content reach unless the operator
+     * {@code combat.reach} wins (reach-override tranche, hub
+     * decisions/VIRTUAL_HITBOXES.md; weakspot multipliers stay
+     * content-only, same split as {@code spawnHp}). No owned file
+     * anywhere means combat stays passive (Q1 cohabitation): the seal
+     * stays empty and any hit-time read refuses loudly instead of
+     * defaulting 1.0x.
      */
     private void wireCombat(List<Packs.PackSpec> specs) {
         if (ownedPath == null) {
@@ -392,10 +396,14 @@ public final class MatouBridgeMod {
         }
         PolicyPack policy = policy("E_COMBAT_POLICY");
         BeastModel.sealWeakspots(policy.combatWeakspots());
-        combatReach = policy.combatReach();
+        combatReach = OperatorPolicy.effectiveCombatReach(
+                policy.combatReach(), specs);
+        String combatNote = OperatorPolicy.present(specs,
+                OperatorPolicy.COMBAT_REACH) ? " overridden <combat.reach>"
+                : "";
         System.out.println("[MatouBridge] combat wired <"
                 + policy.combatWeakspots() + "> reach <" + combatReach
-                + ">");
+                + ">" + combatNote);
     }
 
     /** Comma join for the override log suffix (Java 8, no extra dep). */    private static String join(List<String> parts) {

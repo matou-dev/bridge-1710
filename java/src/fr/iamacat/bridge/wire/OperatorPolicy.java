@@ -7,11 +7,14 @@ import java.util.List;
 
 /**
  * T2 operator overrides (hub decisions/SPAWN.md operator-override
- * tranche): the operator tunes content-decided spawn/loot policy from
- * {@code packs.cfg} without touching {@code owned.matou}.
+ * tranche, extended by the combat reach-override tranche in hub
+ * decisions/VIRTUAL_HITBOXES.md): the operator tunes content-decided
+ * spawn/loot/combat policy from {@code packs.cfg} without touching
+ * {@code owned.matou}.
  *
  * <p>Placement: this package is the shared base below the
- * {@code spawn}/{@code loot} leaves (both import down, never sideways),
+ * {@code spawn}/{@code loot}/{@code combat} leaves (all import down,
+ * never sideways),
  * and beside the SPI seam (no SPI change, no re-pin — the vocabulary is
  * bridge-owned operator domain, content names stay in example1).
  *
@@ -27,14 +30,18 @@ import java.util.List;
  *   side independently; a merged inversion refuses).</li>
  *   <li>{@code loot.count} — items per harvest (positive u32, default
  *   content drop_count).</li>
+ *   <li>{@code combat.reach} — eye-to-hitVec ray-test cutoff in blocks
+ *   (positive finite f64, default content reach). Weakspot multipliers
+ *   stay content-only (damage balance, same split as {@code spawnHp} —
+ *   no operator key, never a quiet knob).</li>
  * </ul>
  *
  * <p>Precedence: operator present wins, else content. Unknown
- * {@code spawn.*}/{@code loot.*} keys refuse loudly (a typo is never a
- * silent default); other namespaces ({@code ownedFile}, {@code block.},
- * {@code veinblock.}, ...) are not this file's business. Several wire
- * lines carrying the same key with different values refuse loudly
- * (silent picks are defaults).
+ * {@code spawn.*}/{@code loot.*}/{@code combat.*} keys refuse loudly (a
+ * typo is never a silent default); other namespaces ({@code ownedFile},
+ * {@code block.}, {@code veinblock.}, ...) are not this file's business.
+ * Several wire lines carrying the same key with different values refuse
+ * loudly (silent picks are defaults).
  *
  * <p>Loot scope rides no key: the ore is the operator wire-block column
  * ({@link #wireBlocks}), one entry per distinct wire block in line
@@ -57,6 +64,8 @@ public final class OperatorPolicy {
     public static final String SPAWN_Y_MAX = "spawn.y_max";
     /** Operator items-per-harvest override (positive u32). */
     public static final String LOOT_COUNT = "loot.count";
+    /** Operator eye-to-hitVec cutoff override (positive finite f64). */
+    public static final String COMBAT_REACH = "combat.reach";
 
     private OperatorPolicy() {}
 
@@ -117,6 +126,31 @@ public final class OperatorPolicy {
         if (e <= 0) {
             throw new IllegalArgumentException("E_LOOT_WIRE:range <count="
                     + e + "> (want > 0, content or override)");
+        }
+        return e;
+    }
+
+    /**
+     * Effective combat reach: content reach with the operator win
+     * applied (hub decisions/VIRTUAL_HITBOXES.md reach-override
+     * tranche — the weakspot table itself stays content-only).
+     *
+     * @throws NullPointerException when specs is null.
+     * @throws IllegalArgumentException on bad/multi/unknown operator
+     *         values or a non-positive non-finite merge — never
+     *         defaulted.
+     */
+    public static double effectiveCombatReach(double reach,
+            List<PackSpec> specs) {
+        if (specs == null) {
+            throw new NullPointerException("E_COMBAT_WIRE:null specs");
+        }
+        rejectUnknownCombat(specs);
+        Double o = positiveFinite(specs, COMBAT_REACH, "E_COMBAT_WIRE");
+        double e = o != null ? o.doubleValue() : reach;
+        if (!(e > 0.0) || Double.isNaN(e) || Double.isInfinite(e)) {
+            throw new IllegalArgumentException("E_COMBAT_WIRE:range <reach="
+                    + e + "> (want positive finite f64, content or override)");
         }
         return e;
     }
@@ -237,6 +271,25 @@ public final class OperatorPolicy {
         }
     }
 
+    /** Positive-finite-f64 operator arg, null when absent. Loud, never 0/NaN. */
+    private static Double positiveFinite(List<PackSpec> specs, String key,
+            String code) {
+        String raw = singleValue(specs, key, code);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            double v = Double.parseDouble(raw);
+            if (!(v > 0.0) || Double.isNaN(v) || Double.isInfinite(v)) {
+                throw new NumberFormatException("non-positive-or-infinite");
+            }
+            return Double.valueOf(v);
+        } catch (NumberFormatException bad) {
+            throw new IllegalArgumentException(code + ":bad <" + key + "="
+                    + raw + "> (want positive finite f64, never defaulted)");
+        }
+    }
+
     /** Unknown {@code spawn.*} keys refuse (typos never vanish). */
     private static void rejectUnknownSpawn(List<PackSpec> specs) {
         for (PackSpec spec : specs) {
@@ -270,6 +323,23 @@ public final class OperatorPolicy {
                     throw new IllegalArgumentException(
                             "E_LOOT_WIRE:unknown <" + key + "> (want "
                                     + "loot.count, never silent typos)");
+                }
+            }
+        }
+    }
+
+    /** Unknown {@code combat.*} keys refuse (typos never vanish). */
+    private static void rejectUnknownCombat(List<PackSpec> specs) {
+        for (PackSpec spec : specs) {
+            if (spec == null) {
+                throw new NullPointerException("E_COMBAT_WIRE:null spec");
+            }
+            for (String key : spec.args.keySet()) {
+                if (key != null && key.startsWith("combat.")
+                        && !key.equals(COMBAT_REACH)) {
+                    throw new IllegalArgumentException(
+                            "E_COMBAT_WIRE:unknown <" + key + "> (want "
+                                    + "combat.reach, never silent typos)");
                 }
             }
         }
