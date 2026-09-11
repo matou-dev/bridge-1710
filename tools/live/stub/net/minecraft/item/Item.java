@@ -7,4 +7,15 @@ package net.minecraft.item;
  * type only — no member is called, so no pin is owned here.
  */
 public class Item {
+    public Item setMaxStackSize(int maxStackSize) {
+        return this;
+    }
+
+    public Item setUnlocalizedName(String unlocalizedName) {
+        return this;
+    }
+
+    public static int getIdFromItem(Item item) {
+        return 0;
+    }
 }

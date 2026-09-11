@@ -22,6 +22,7 @@ import java.util.Set;
 import net.minecraft.block.Block;
 import net.minecraft.client.model.ModelPig;
 import net.minecraft.client.renderer.entity.RenderPig;
+import net.minecraft.item.Item;
 
 /**
  * Registration half of example1 (see hub decisions/REGISTRATION.md):
@@ -62,6 +63,8 @@ public final class Example1Mod {
 
     private final Map<String, Block> registered =
             new HashMap<String, Block>();
+    private final Map<String, Item> registeredItems =
+            new HashMap<String, Item>();
     private String registeredEntity;
 
     /**
@@ -88,6 +91,7 @@ public final class Example1Mod {
         for (Packs.PackSpec spec : specs) {
             registerCustom(spec);
         }
+        registerItems(specs);
         registerBeast(specs);
     }
 
@@ -107,6 +111,16 @@ public final class Example1Mod {
             }
             System.out.println("[MatouBridge] registered <" + e.getKey()
                     + "> id " + Block.getIdFromBlock(e.getValue()));
+        }
+        for (Map.Entry<String, Item> e : registeredItems.entrySet()) {
+            int colon = e.getKey().indexOf(':');
+            String shortName = e.getKey().substring(colon + 1);
+            if (GameRegistry.findItem(MODID, shortName) != e.getValue()) {
+                throw new IllegalStateException(
+                        "E_REG_ITEM:unresolved <" + e.getKey() + ">");
+            }
+            System.out.println("[MatouBridge] registered-item <" + e.getKey()
+                    + "> id " + Item.getIdFromItem(e.getValue()));
         }
         if (registeredEntity != null) {
             if (EntityRegistry.instance().lookupModSpawn(
@@ -223,6 +237,44 @@ public final class Example1Mod {
         }
     }
 
+    private void registerItems(List<Packs.PackSpec> specs) {
+        Set<String> owned = new HashSet<String>();
+        for (Packs.PackSpec spec : specs) {
+            String path = spec.args.get("ownedFile");
+            if (path != null) {
+                owned.add(path);
+            }
+        }
+        for (String ownedFile : owned) {
+            for (Object o : loadItemSpecs(ownedFile)) {
+                String shortName = (String) specField(o, "name", ownedFile);
+                String want = MODID + ":" + shortName;
+                if (registeredItems.containsKey(want)) {
+                    continue;
+                }
+                if (GameRegistry.findItem(MODID, shortName) != null) {
+                    throw new IllegalArgumentException(
+                            "E_REG_ITEM:already registered <" + want + ">");
+                }
+                Object s = specField(o, "stack", ownedFile);
+                if (!(s instanceof Integer)) {
+                    throw new IllegalArgumentException(
+                            "E_REG_SPEC:shape <" + ownedFile + "> (bad stack type)");
+                }
+                int stack = ((Integer) s).intValue();
+                Item item = new MatouItem(shortName, stack);
+                try {
+                    GameRegistry.registerItem(item, shortName);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException(
+                            "E_REG_ITEM:refused <" + want + "> ("
+                                    + e.getMessage() + ")", e);
+                }
+                registeredItems.put(want, item);
+            }
+        }
+    }
+
     /**
      * Client-only renderer mapping: the generic beast reuses the vanilla
      * pig renderer until the custom-renderer tranche (main model plus the
@@ -306,6 +358,40 @@ public final class Example1Mod {
         } catch (NoSuchMethodException e) {
             throw new IllegalArgumentException("E_REG_SPEC:shape "
                     + "<fr.iamacat.example1.BlockSpec> ("
+                    + e.getMessage() + ")", e);
+        }
+        try {
+            Object out = fromFile.invoke(null, ownedFile);
+            if (!(out instanceof List)) {
+                throw new IllegalStateException("E_REG_SPEC:shape "
+                        + "<fromFile> (want List)");
+            }
+            return (List<?>) out;
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new IllegalArgumentException("E_REG_SPEC:unreadable <"
+                    + ownedFile + "> (" + cause.getMessage() + ")", e);
+        } catch (IllegalAccessException e) {
+            throw new IllegalArgumentException("E_REG_SPEC:shape <"
+                    + ownedFile + "> (" + e.getMessage() + ")", e);
+        }
+    }
+
+    private static List<?> loadItemSpecs(String ownedFile) {
+        final Class<?> cls;
+        try {
+            cls = Class.forName("fr.iamacat.example1.ItemSpec");
+        } catch (ClassNotFoundException e) {
+            throw new IllegalArgumentException("E_REG_SPEC:missing "
+                    + "example1 for <" + ownedFile + "> ("
+                    + e.getMessage() + ")", e);
+        }
+        final Method fromFile;
+        try {
+            fromFile = cls.getMethod("fromFile", String.class);
+        } catch (NoSuchMethodException e) {
+            throw new IllegalArgumentException("E_REG_SPEC:shape "
+                    + "<fr.iamacat.example1.ItemSpec> ("
                     + e.getMessage() + ")", e);
         }
         try {

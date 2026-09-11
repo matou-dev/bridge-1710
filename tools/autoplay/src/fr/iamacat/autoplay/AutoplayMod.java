@@ -4,6 +4,7 @@ import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
+import cpw.mods.fml.common.registry.GameRegistry;
 import cpw.mods.fml.relauncher.Side;
 import fr.iamacat.bridge.forge.MatouEntity;
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.world.World;
 import net.minecraftforge.common.MinecraftForge;
@@ -473,13 +475,18 @@ public class AutoplayMod {
         if (world.loadedEntityList == null) {
             return;
         }
+        Item gem = GameRegistry.findItem("example1", "my_gem");
+        if (gem == null) {
+            lootFail("unknown <example1:my_gem> (want registered gem)");
+            return;
+        }
         for (Object o : world.loadedEntityList) {
             if (!(o instanceof EntityItem)) {
                 continue;
             }
             EntityItem e = (EntityItem) o;
             ItemStack stack = e.getEntityItem();
-            if (stack == null || stack.getItem() != Items.diamond) {
+            if (stack == null || stack.getItem() != gem) {
                 continue;
             }
             if (!oreDropped && near(e, LOOT_ORE_X, LOOT_ORE_Y,
@@ -487,7 +494,7 @@ public class AutoplayMod {
                 oreDropped = true;
                 oreDropTick = worldTicks;
                 System.out.println("[MatouAutoplay] loot ore dropped "
-                        + "<diamond> at worldTick " + oreDropTick
+                        + "<example1:my_gem> at worldTick " + oreDropTick
                         + " (elapsed " + (oreDropTick - lootOreTick)
                         + ", want immediate)");
             }
@@ -496,7 +503,7 @@ public class AutoplayMod {
                 beastDropped = true;
                 beastDropTick = worldTicks;
                 System.out.println("[MatouAutoplay] loot beast dropped "
-                        + "<diamond> at worldTick " + beastDropTick
+                        + "<example1:my_gem> at worldTick " + beastDropTick
                         + " (elapsed " + (beastDropTick - lootBeastTick)
                         + ", want immediate)");
             }
@@ -609,20 +616,25 @@ public class AutoplayMod {
         if (world.loadedEntityList == null) {
             return;
         }
+        Item gem = GameRegistry.findItem("example1", "my_gem");
+        if (gem == null) {
+            spawnFail("unknown <example1:my_gem> (want registered gem)");
+            return;
+        }
         for (Object o : world.loadedEntityList) {
             if (!(o instanceof EntityItem)) {
                 continue;
             }
             EntityItem e = (EntityItem) o;
             ItemStack stack = e.getEntityItem();
-            if (stack == null || stack.getItem() != Items.diamond) {
+            if (stack == null || stack.getItem() != gem) {
                 continue;
             }
             if (near(e, killX, killY, killZ)) {
                 carrierDropped = true;
                 carrierTick = worldTicks;
                 System.out.println("[MatouAutoplay] spawn beast dropped "
-                        + "<diamond> at worldTick " + carrierTick
+                        + "<example1:my_gem> at worldTick " + carrierTick
                         + " (elapsed " + (carrierTick - killTick)
                         + ", want immediate)");
                 return;

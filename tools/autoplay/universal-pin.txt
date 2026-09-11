@@ -26,3 +26,4 @@ net.minecraftforge.event.entity.EntityJoinWorldEvent EntityJoinWorldEvent(
 net.minecraftforge.event.entity.EntityEvent  entity;
 net.minecraftforge.event.entity.EntityJoinWorldEvent  world;
 cpw.mods.fml.common.eventhandler.Event setCanceled(
+cpw.mods.fml.common.registry.GameRegistry findItem(

@@ -91,6 +91,9 @@ pin_field "net/minecraft/block/Block/opaque"
 pin_method "net/minecraft/world/World/spawnEntityInWorld" "(Lnet/minecraft/entity/Entity;)Z"
 pin_method "net/minecraft/entity/item/EntityItem/getEntityItem" "()Lnet/minecraft/item/ItemStack;"
 pin_method "net/minecraft/item/ItemStack/getItem" "()Lnet/minecraft/item/Item;"
+pin_method "net/minecraft/item/Item/setMaxStackSize" "(I)Lnet/minecraft/item/Item;"
+pin_method "net/minecraft/item/Item/setUnlocalizedName" "(Ljava/lang/String;)Lnet/minecraft/item/Item;"
+pin_method "net/minecraft/item/Item/getIdFromItem" "(Lnet/minecraft/item/Item;)I"
 pin_field "net/minecraft/init/Items/diamond"
 pin_field "net/minecraft/entity/Entity/worldObj"
 pin_field "net/minecraft/entity/Entity/posX"
@@ -192,6 +195,8 @@ pin_uni 'net.minecraftforge.event.world.BlockEvent$HarvestDropsEvent' 'HarvestDr
 pin_uni 'net.minecraftforge.event.entity.living.LivingEvent' 'entityLiving'
 pin_uni 'net.minecraftforge.event.entity.living.LivingDropsEvent' 'LivingDropsEvent('
 pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerBlock(aji, java.lang.String)'
+pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'registerItem(adb, java.lang.String)'
+pin_uni 'cpw.mods.fml.common.registry.GameRegistry' 'findItem(java.lang.String, java.lang.String)'
 pin_uni 'cpw.mods.fml.common.event.FMLPreInitializationEvent' 'FMLPreInitializationEvent('
 echo "ok b3-live : forge stubs pinned to universal"
 
@@ -253,7 +258,7 @@ normjar() {
   python3 - "$1" "$EPOCH" <<'EOF'
 import sys, zipfile, datetime
 path, epoch = sys.argv[1], int(sys.argv[2])
-dt = datetime.datetime.utcfromtimestamp(epoch).timetuple()[:6]
+dt = datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc).timetuple()[:6]
 zin = zipfile.ZipFile(path)
 items = [(i, zin.read(i.filename)) for i in zin.infolist()]
 zin.close()
@@ -355,7 +360,7 @@ echo "eula=true" > "$SERV/eula.txt"
 printf 'online-mode=false\nlevel-type=FLAT\ngamemode=1\ndifficulty=0\nmotd=B3 live proof\nmax-tick-time=-1\n' > "$SERV/server.properties"
 rm -rf "$SERV/world" "$SERV/logs"
 set +e
-(cd "$SERV" && timeout "$BOOT_SECS" "$J8/java" -Xmx1G -jar "$UNI" nogui > boot-b3.log 2>&1)
+(cd "$SERV" && timeout "$BOOT_SECS" "$J8/java" -Xmx1G -jar "$UNI" nogui < /dev/null > boot-b3.log 2>&1)
 code=$?
 set -e
 [ "$code" -eq 124 ] || { echo "FAIL b3-live : server exited early (code $code, see $SERV/boot-b3.log)"; exit 1; }
