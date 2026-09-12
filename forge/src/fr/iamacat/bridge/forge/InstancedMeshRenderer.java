@@ -4,12 +4,15 @@ import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
 import fr.iamacat.bridge.ForgeSnapshot;
+import fr.iamacat.bridge.model.BeastAnimation;
 import fr.iamacat.bridge.model.BeastModel;
 import fr.iamacat.bridge.model.BeastTexture;
 import fr.iamacat.bridge.render.RenderJob;
 import fr.iamacat.bridge.render.RenderSeal;
 import fr.iamacat.spi.MatouId;
+import fr.iamacat.spi.model.MatouAnimation;
 import fr.iamacat.spi.model.MatouModel;
+import fr.iamacat.spi.model.Molang;
 import fr.iamacat.spi.render.GlBackend;
 import fr.iamacat.spi.render.InstanceBucket.Rec;
 import fr.iamacat.spi.render.InstanceFormat;
@@ -31,8 +34,11 @@ import org.lwjgl.opengl.GL11;
 /**
  * Client-only instanced mesh renderer hooked into RenderWorldLastEvent.
  * Renders all visible MatouEntity instances via OpenGL 3.1+ instancing primitives (Lwjgl2Backend).
- * The static mesh is baked from the shipped {@code my_beast.geo.json}
- * (hub decisions/MATOU_MODEL.md) — never a hardcoded box again.
+ * The static mesh is the SPI skinned bake of the shipped
+ * {@code my_beast.geo.json} (hub decisions/MATOU_ANIMATION.md) — bind
+ * positions plus the file-order bone index per vertex, never a hardcoded
+ * box again. Per-instance bone deltas ride a second instanced VBO (GPU
+ * skinning over the static VBO — the CPU oracle never uploads).
  *
  * <p>1.7.10 shape (derived from the sha1-pinned srg-mcp.srg, never
  * recalled — same derive discipline as the 1122 narrow map): the client
@@ -49,31 +55,62 @@ import org.lwjgl.opengl.GL11;
 public final class InstancedMeshRenderer {
     private static final InstancedMeshRenderer INSTANCE = new InstancedMeshRenderer();
 
+    /**
+     * Skinned stride (SPI {@code bakeSkinnedMesh} layout: pos3, uv2,
+     * normal3, bone1 — bind positions, bone1 is the file-order bone
+     * index as float). The stride-8 {@code bakeMesh} stays the gate
+     * oracle layout, never the upload.
+     */
+    private static final int SKINNED_STRIDE = 9;
+
+    /**
+     * Bone ceiling for the per-instance path (2-bone shipped beast:
+     * body+head). Each bone costs one instanced mat4 (4 attribute
+     * slots); with the 4 static + 4 instance slots the 2-bone proof
+     * fills the guaranteed 16 exactly. A third bone refuses loudly at
+     * {@code initGl} — the generic palette (bone texture / packed pose)
+     * is the named follow-up, never a silent drop.
+     */
+    private static final int SKINNED_BONES = 2;
+
     private static final String VERTEX_SHADER =
             "#version 330 core\n"
             + "layout(location = 0) in vec3 a_pos;\n"
             + "layout(location = 1) in vec2 a_uv;\n"
             + "layout(location = 2) in vec3 a_normal;\n"
-            + "layout(location = 3) in vec3 i_pos;\n"
-            + "layout(location = 4) in vec3 i_rot_scale;\n"
-            + "layout(location = 5) in vec4 i_color;\n"
-            + "layout(location = 6) in vec2 i_light;\n"
+            + "layout(location = 3) in float a_bone;\n"
+            + "layout(location = 4) in vec3 i_pos;\n"
+            + "layout(location = 5) in vec3 i_rot_scale;\n"
+            + "layout(location = 6) in vec4 i_color;\n"
+            + "layout(location = 7) in vec2 i_light;\n"
+            + "layout(location = 8) in vec4 i_b0c0;\n"
+            + "layout(location = 9) in vec4 i_b0c1;\n"
+            + "layout(location = 10) in vec4 i_b0c2;\n"
+            + "layout(location = 11) in vec4 i_b0c3;\n"
+            + "layout(location = 12) in vec4 i_b1c0;\n"
+            + "layout(location = 13) in vec4 i_b1c1;\n"
+            + "layout(location = 14) in vec4 i_b1c2;\n"
+            + "layout(location = 15) in vec4 i_b1c3;\n"
             + "uniform mat4 u_projection;\n"
             + "uniform mat4 u_view;\n"
             + "out vec4 v_color;\n"
             + "out vec3 v_normal;\n"
             + "out vec2 v_uv;\n"
             + "void main() {\n"
+            + "    mat4 b0 = mat4(i_b0c0, i_b0c1, i_b0c2, i_b0c3);\n"
+            + "    mat4 b1 = mat4(i_b1c0, i_b1c1, i_b1c2, i_b1c3);\n"
+            + "    mat4 skin = a_bone < 0.5 ? b0 : b1;\n"
+            + "    vec4 posed = skin * vec4(a_pos, 1.0);\n"
             + "    float yaw = i_rot_scale.x;\n"
             + "    float scale = i_rot_scale.z;\n"
             + "    float cy = cos(yaw);\n"
             + "    float sy = sin(yaw);\n"
             + "    mat3 rotY = mat3(cy, 0.0, sy, 0.0, 1.0, 0.0, -sy, 0.0, cy);\n"
-            + "    vec3 localPos = rotY * (a_pos * scale);\n"
+            + "    vec3 localPos = rotY * (posed.xyz * scale);\n"
             + "    vec3 worldRelPos = localPos + i_pos;\n"
             + "    gl_Position = u_projection * u_view * vec4(worldRelPos, 1.0);\n"
             + "    v_color = i_color;\n"
-            + "    v_normal = rotY * a_normal;\n"
+            + "    v_normal = normalize(rotY * (mat3(skin) * a_normal));\n"
             + "    v_uv = a_uv;\n"
             + "}\n";
 
@@ -105,6 +142,7 @@ public final class InstancedMeshRenderer {
     private int vao;
     private int meshVbo;
     private int instanceVbo;
+    private int boneVbo;
     private int vertexCount;
     private int uProjLoc;
     private int uViewLoc;
@@ -113,6 +151,8 @@ public final class InstancedMeshRenderer {
     private final FloatBuffer viewMatrixBuffer;
     private final FloatBuffer projMatrixBuffer;
     private FloatBuffer instanceBuffer;
+    /** Per-instance bone deltas (2 mat4 = 32 floats per beast, columns). */
+    private FloatBuffer boneBuffer;
     /** Shared-texture bucket key: the V2 shader samples the beast texture
      * and multiplies the tint (hub decisions/MATOU_MODEL.md) — one mesh
      * and one texture today, per-mob textures plug their own keys here
@@ -129,6 +169,7 @@ public final class InstancedMeshRenderer {
         this.viewMatrixBuffer = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         this.projMatrixBuffer = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         this.instanceBuffer = ByteBuffer.allocateDirect(512 * InstanceFormat.STRIDE_BYTES).order(ByteOrder.nativeOrder()).asFloatBuffer();
+        this.boneBuffer = ByteBuffer.allocateDirect(512 * SKINNED_BONES * 16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
     }
 
     public static InstancedMeshRenderer getInstance() {
@@ -171,43 +212,72 @@ public final class InstancedMeshRenderer {
 
         meshVbo = backend.genBuffers();
         backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, meshVbo);
-        // Model tranche: the static mesh is the SPI bake of the shipped
-        // beast geometry, never a hardcoded box. A missing or broken
-        // model refuses here, loudly, before the first frame.
-        float[] mesh = BeastModel.cached().mesh();
-        vertexCount = mesh.length / MatouModel.VERTEX_STRIDE;
+        // Animation tranche: the static mesh is the SPI skinned bake of
+        // the shipped beast geometry (bind positions + file-order bone
+        // index), never a rebaked pose. A missing or broken model, a
+        // missing animation file, or a non-2-bone beast refuses here,
+        // loudly, before the first frame.
+        MatouModel beastModel = BeastModel.cached().model();
+        if (beastModel.bones.size() != SKINNED_BONES) {
+            throw new IllegalStateException("E_ANIM_SKIN:bones <"
+                    + beastModel.bones.size() + "> (the per-instance mat4 "
+                    + "path fills the guaranteed 16 attributes at 2 "
+                    + "bones — the generic palette is the named "
+                    + "follow-up)");
+        }
+        BeastAnimation.cached();
+        float[] mesh = beastModel.bakeSkinnedMesh();
+        vertexCount = mesh.length / SKINNED_STRIDE;
         FloatBuffer meshData = ByteBuffer.allocateDirect(mesh.length * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         meshData.put(mesh);
         meshData.flip();
         backend.bufferData(GlBackend.GL_ARRAY_BUFFER, meshData, GlBackend.GL_STATIC_DRAW);
 
-        int meshStride = MatouModel.VERTEX_STRIDE * 4;
+        int meshStride = SKINNED_STRIDE * 4;
         backend.enableVertexAttribArray(0);
         backend.vertexAttribPointer(0, 3, GlBackend.GL_FLOAT, false, meshStride, 0);
         backend.enableVertexAttribArray(1);
         backend.vertexAttribPointer(1, 2, GlBackend.GL_FLOAT, false, meshStride, 3 * 4);
         backend.enableVertexAttribArray(2);
         backend.vertexAttribPointer(2, 3, GlBackend.GL_FLOAT, false, meshStride, 5 * 4);
+        backend.enableVertexAttribArray(3);
+        backend.vertexAttribPointer(3, 1, GlBackend.GL_FLOAT, false, meshStride, 8 * 4);
 
         instanceVbo = backend.genBuffers();
         backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, instanceVbo);
 
         int instStride = InstanceFormat.STRIDE_BYTES;
-        backend.enableVertexAttribArray(3);
-        backend.vertexAttribPointer(3, 3, GlBackend.GL_FLOAT, false, instStride, 0);
-        backend.vertexAttribDivisor(3, 1);
-
         backend.enableVertexAttribArray(4);
-        backend.vertexAttribPointer(4, 3, GlBackend.GL_FLOAT, false, instStride, 12);
+        backend.vertexAttribPointer(4, 3, GlBackend.GL_FLOAT, false, instStride, 0);
         backend.vertexAttribDivisor(4, 1);
 
         backend.enableVertexAttribArray(5);
-        backend.vertexAttribPointer(5, 4, GlBackend.GL_FLOAT, false, instStride, 24);
+        backend.vertexAttribPointer(5, 3, GlBackend.GL_FLOAT, false, instStride, 12);
         backend.vertexAttribDivisor(5, 1);
 
         backend.enableVertexAttribArray(6);
-        backend.vertexAttribPointer(6, 2, GlBackend.GL_FLOAT, false, instStride, 40);
+        backend.vertexAttribPointer(6, 4, GlBackend.GL_FLOAT, false, instStride, 24);
         backend.vertexAttribDivisor(6, 1);
+
+        backend.enableVertexAttribArray(7);
+        backend.vertexAttribPointer(7, 2, GlBackend.GL_FLOAT, false, instStride, 40);
+        backend.vertexAttribDivisor(7, 1);
+
+        // Per-instance bone deltas (second instanced VBO, STREAM per
+        // bucket): 2 mat4 as 8 vec4 columns (SPI row-major transposed
+        // once at pack — GL columns, never recomputed).
+        boneVbo = backend.genBuffers();
+        backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, boneVbo);
+        int boneStride = SKINNED_BONES * 16 * 4;
+        for (int b = 0; b < SKINNED_BONES; b++) {
+            for (int c = 0; c < 4; c++) {
+                int loc = 8 + b * 4 + c;
+                backend.enableVertexAttribArray(loc);
+                backend.vertexAttribPointer(loc, 4, GlBackend.GL_FLOAT,
+                        false, boneStride, (b * 16 + c * 4) * 4);
+                backend.vertexAttribDivisor(loc, 1);
+            }
+        }
 
         // Texture tranche (hub decisions/MATOU_MODEL.md, V2): the beast
         // texture uploads once, NEAREST + CLAMP_TO_EDGE (MC pixels, no
@@ -234,7 +304,7 @@ public final class InstancedMeshRenderer {
         backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, 0);
         initialized = true;
         System.out.println("[MatouRenderer] ready mesh=" + vertexCount
-                + " verts stride=" + MatouModel.VERTEX_STRIDE
+                + " verts stride=" + SKINNED_STRIDE
                 + " texture=" + beastTex.width() + "x" + beastTex.height()
                 + " program=" + program);
     }
@@ -380,13 +450,17 @@ public final class InstancedMeshRenderer {
 
         backend.bindVertexArray(vao);
         // One instanced draw per planned bucket (the GPU execution
-        // order InstanceBucket.plan proves): the buffer is repacked per
-        // bucket, so a culled bucket costs nothing and a visible one
+        // order InstanceBucket.plan proves): both buffers are repacked
+        // per bucket, so a culled bucket costs nothing and a visible one
         // binds once. The texture binds per bucket beside the repack —
         // one shared texture today, per-mob textures plug the same call.
+        // Bone deltas ride per instance (GPU skinning over the static
+        // VBO — one walk phase per mob, never a shared uniform).
+        MatouModel skinModel = BeastModel.cached().model();
         for (Map.Entry<String, List<Integer>> bucket
                 : buckets.entrySet()) {
             instanceBuffer.clear();
+            boneBuffer.clear();
             for (Integer index : bucket.getValue()) {
                 MatouEntity beast = beasts.get(index.intValue());
                 Entity e = beast;
@@ -396,6 +470,13 @@ public final class InstancedMeshRenderer {
                     instanceBuffer.flip();
                     expanded.put(instanceBuffer);
                     instanceBuffer = expanded;
+                }
+                if (boneBuffer.remaining() < SKINNED_BONES * 16) {
+                    FloatBuffer expanded = ByteBuffer.allocateDirect(boneBuffer.capacity() * 2 * 4)
+                            .order(ByteOrder.nativeOrder()).asFloatBuffer();
+                    boneBuffer.flip();
+                    expanded.put(boneBuffer);
+                    boneBuffer = expanded;
                 }
                 double entX = e.lastTickPosX + (e.posX - e.lastTickPosX) * partialTicks;
                 double entY = e.lastTickPosY + (e.posY - e.lastTickPosY) * partialTicks;
@@ -408,11 +489,23 @@ public final class InstancedMeshRenderer {
                         yaw, pitch, 1.0f,
                         1.0f, 0.7f, 0.7f, 1.0f,
                         0.0f, 0.0f);
+                double t = e.ticksExisted / 20.0;
+                Molang.Ctx ctx = new Molang.Ctx(t, t, 0.0, 0.05, null);
+                MatouAnimation.AnimPose pose = BeastAnimation.poseFor(
+                        beast.mobOrFirst(), t, ctx);
+                Map<String, float[]> deltas = skinModel.poseDeltaMatrices(pose);
+                for (int bi = 0; bi < skinModel.bones.size(); bi++) {
+                    packColumns(boneBuffer,
+                            deltas.get(skinModel.bones.get(bi).name));
+                }
             }
             instanceBuffer.flip();
+            boneBuffer.flip();
             backend.bindTexture(GlBackend.GL_TEXTURE_2D, texture);
             backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, instanceVbo);
             backend.bufferData(GlBackend.GL_ARRAY_BUFFER, instanceBuffer, GlBackend.GL_STREAM_DRAW);
+            backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, boneVbo);
+            backend.bufferData(GlBackend.GL_ARRAY_BUFFER, boneBuffer, GlBackend.GL_STREAM_DRAW);
             // Draw-proof discipline (hub decisions/MATOU_MODEL.md, visual
             // tranche): pre-existing GL errors belong to the shared context
             // (MC's own state may carry some) — drain them so only this draw
@@ -437,6 +530,19 @@ public final class InstancedMeshRenderer {
         backend.bindVertexArray(0);
         backend.useProgram(0);
         backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, 0);
+    }
+
+    /**
+     * Packs one SPI row-major delta as 4 GL columns (transpose once at
+     * pack — the shader builds {@code mat4} from columns, the SPI
+     * contract delivers rows; verbatim values, era-native order).
+     */
+    private static void packColumns(FloatBuffer dst, float[] rowMajor) {
+        for (int c = 0; c < 4; c++) {
+            for (int r = 0; r < 4; r++) {
+                dst.put(rowMajor[r * 4 + c]);
+            }
+        }
     }
 
 }

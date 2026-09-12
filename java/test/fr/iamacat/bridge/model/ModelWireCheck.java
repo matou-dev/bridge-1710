@@ -7,7 +7,10 @@ import fr.iamacat.spi.hit.BoneBox;
 import fr.iamacat.spi.hit.HitTester;
 import fr.iamacat.spi.hit.RayHit;
 import fr.iamacat.spi.hit.Vec3d;
+import fr.iamacat.spi.model.MatouAnimation;
+import fr.iamacat.spi.model.MatouAnimationParser;
 import fr.iamacat.spi.model.MatouModel;
+import fr.iamacat.spi.model.Molang;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -51,6 +54,7 @@ public final class ModelWireCheck {
         testShippedAsset();
         testRotatedAsset();
         testShippedTexture();
+        testShippedAnimation();
         testTempRoundtrip();
         testRefusals();
         testCombatReachOverride();
@@ -161,6 +165,116 @@ public final class ModelWireCheck {
         BeastTexture tex = BeastTexture.load("tools/live/my_beast.png",
                 rotated.model().textureWidth, rotated.model().textureHeight);
         check(tex.width() == 64 && tex.height() == 64, "rotated grid stays 64x64");
+    }
+
+    /**
+     * Animation battery (consumer tranche, hub
+     * decisions/MATOU_ANIMATION.md): the shipped walk clip loads,
+     * evaluates (life-driven head yaw + keyframed body bob, loop wrap),
+     * seals per mob, and proves the GPU contract (skinned stride-9
+     * layout, identity deltas, posed boxes) — the CPU oracle stays the
+     * gate, never the runtime.
+     */
+    private static void testShippedAnimation() throws Exception {
+        BeastAnimation anim = BeastAnimation.load(
+                "tools/live/my_beast.animation.json");
+        check(anim.clips().size() == 1
+                && anim.clips().containsKey("animation.beast.walk"),
+                "shipped animation carries the walk clip");
+        MatouAnimation walk = anim.clips().get("animation.beast.walk");
+        check(walk.loop == MatouAnimation.Loop.LOOP, "walk loops");
+        check(Math.abs(walk.length - 0.5) < 1e-12, "walk length defaults to last key");
+        check(walk.bones.size() == 2
+                && walk.bones.containsKey("body")
+                && walk.bones.containsKey("head"),
+                "walk animates body+head (shipped bones)");
+        Molang.Ctx at0 = new Molang.Ctx(0.0, 0.0, 0.0, 0.05, null);
+        check(Math.abs(walk.evaluate(0.0, at0).bones.get("head").rotX) < 1e-9,
+                "walk head starts at 0");
+        Molang.Ctx at30 = new Molang.Ctx(0.0, Math.PI / 6.0, 0.0, 0.05, null);
+        check(Math.abs(walk.evaluate(0.0, at30).bones.get("head").rotX - 30.0) < 1e-9,
+                "walk head reaches +30 at life pi/6");
+        Molang.Ctx mid = new Molang.Ctx(0.25, 0.0, 0.0, 0.05, null);
+        check(Math.abs(walk.evaluate(0.25, mid).bones.get("body").posY - 0.5) < 1e-9,
+                "walk body midpoint lerps exact");
+        Molang.Ctx wrap = new Molang.Ctx(0.6, 0.0, 0.0, 0.05, null);
+        check(Math.abs(walk.evaluate(0.6, wrap).bones.get("body").posY - 0.2) < 1e-9,
+                "walk loop wraps t mod length");
+        assertThrows(() -> BeastAnimation.clipFor("my_beast"),
+                "E_ANIM_WIRE:unwired");
+        Map<String, String> sel = new LinkedHashMap<String, String>();
+        sel.put("my_beast", "animation.beast.walk");
+        BeastAnimation.sealClip(sel);
+        check(BeastAnimation.clipFor(anim, "my_beast") == walk
+                || BeastAnimation.clipFor(anim, "my_beast").name.equals(
+                        "animation.beast.walk"),
+                "sealed clip serves the walk");
+        MatouAnimation.AnimPose pose30 = BeastAnimation.poseFor(
+                anim, "my_beast", 0.0, at30);
+        check(Math.abs(pose30.bones.get("head").rotX - 30.0) < 1e-9,
+                "sealed poseFor drives the head");
+        BeastModel shipped = BeastModel.load("tools/live/my_beast.geo.json");
+        float[] mesh = shipped.mesh();
+        float[] skinned = shipped.model().bakeSkinnedMesh();
+        check(skinned.length == shipped.model().cubeCount() * 36 * 9,
+                "skinned mesh = cubes x 36 stride-9 vertices");
+        check(Math.abs(skinned[0] - mesh[0]) < 1e-9
+                && Math.abs(skinned[1] - mesh[1]) < 1e-9
+                && Math.abs(skinned[2] - mesh[2]) < 1e-9,
+                "skinned bind positions equal the bake");
+        check(skinned[8] == 0.0f, "first cube rides bone 0 (body)");
+        check(skinned[36 * 9 + 8] == 1.0f, "second cube rides bone 1 (head)");
+        Map<String, float[]> ident = shipped.model().poseDeltaMatrices(
+                MatouAnimation.AnimPose.identity());
+        check(ident.size() == 2, "two delta matrices");
+        for (float[] m : ident.values()) {
+            check(m.length == 16, "delta is 4x4");
+            for (int i = 0; i < 16; i++) {
+                float want = (i % 5 == 0) ? 1.0f : 0.0f;
+                check(Math.abs(m[i] - want) < 1e-6, "identity pose yields identity deltas");
+            }
+        }
+        MatouAnimation.AnimPose idPose = walk.evaluate(0.0, at0);
+        check(Arrays.equals(shipped.model().bakePosedMesh(idPose),
+                shipped.model().bakeMesh()),
+                "identity pose bakes byte-identical (compat)");
+        Map<String, float[]> posed = shipped.model().poseDeltaMatrices(pose30);
+        float[] headM = posed.get("head");
+        check(Math.abs(headM[5] - 1.0f) > 0.05f, "posed head delta moves");
+        List<BoneBox> bind = shipped.boxesAt(0.0, 0.0, 0.0);
+        List<BoneBox> pb = shipped.model().placedPosedBoxes(0.0, 0.0, 0.0, pose30);
+        check(pb.size() == 2, "two posed boxes");
+        check(pb.get(1).box.minX <= bind.get(1).box.minX
+                && pb.get(1).box.maxX >= bind.get(1).box.maxX,
+                "posed head covers the bind head");
+        assertThrows(() -> BeastAnimation.load(null), "E_ANIM_GEO:null");
+        assertThrows(() -> BeastAnimation.load("tools/live/no-such-beast.animation.json"),
+                "E_ANIM_GEO:unreadable");
+        assertThrows(() -> BeastAnimation.load("../example1/content/owned.matou"),
+                "E_MODEL_JSON:syntax");
+        assertThrows(() -> BeastAnimation.sealClip(null), "E_ANIM_WIRE:null");
+        assertThrows(() -> BeastAnimation.sealClip(
+                new LinkedHashMap<String, String>()), "E_ANIM_WIRE:empty");
+        Map<String, String> bad = new LinkedHashMap<String, String>();
+        bad.put("my_beast", "animation.beast.missing");
+        BeastAnimation.sealClip(bad);
+        assertThrows(() -> BeastAnimation.poseFor(anim, "my_beast", 0.0, at0),
+                "E_ANIM_WIRE:unknown");
+        BeastAnimation.sealClip(sel);
+        assertThrows(() -> BeastAnimation.clipFor(anim, null), "E_ANIM_WIRE:null");
+        assertThrows(() -> BeastAnimation.clipFor(anim, "nope"), "E_ANIM_WIRE:unknown");
+        assertThrows(() -> BeastAnimation.clipFor(anim, null), "E_ANIM_WIRE:null");
+        assertThrows(() -> BeastAnimation.clipFor(anim, "nope"), "E_ANIM_WIRE:unknown");
+        assertThrows(() -> BeastAnimation.poseFor(anim, "nope", 0.0, at0),
+                "E_ANIM_WIRE:unknown");
+        Map<String, MatouAnimation> leg = MatouAnimationParser.parse(
+                "{\"format_version\": \"1.10.0\", \"animations\": {"
+                + "\"animation.beast.walk\": {\"loop\": false,"
+                + " \"bones\": {\"leg\": {\"rotation\": [\"1.0\", 0.0, 0.0]}}}}}");
+        final MatouAnimation.AnimPose legPose = leg.get("animation.beast.walk")
+                .evaluate(0.0, Molang.zeroCtx());
+        assertThrows(() -> shipped.model().poseDeltaMatrices(legPose),
+                "E_ANIM_BONE:unknown");
     }
 
     private static void testTempRoundtrip() throws Exception {

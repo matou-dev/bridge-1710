@@ -10,6 +10,7 @@ import cpw.mods.fml.relauncher.Side;
 import fr.iamacat.bridge.ForgeCells;
 import fr.iamacat.bridge.ForgeSnapshot;
 import fr.iamacat.bridge.Packs;
+import fr.iamacat.bridge.model.BeastAnimation;
 import fr.iamacat.bridge.model.BeastModel;
 import fr.iamacat.bridge.wire.OperatorPolicy;
 import fr.iamacat.bridge.spike.MinedStore;
@@ -529,6 +530,17 @@ public final class MatouBridgeMod {
                             specs)));
         }
         BeastModel.sealCombat(perMobWeakspots, perMobReach);
+        // Animation tranche (hub decisions/MATOU_ANIMATION.md): one clip
+        // per tick per mob, selected at wire time beside the combat tables
+        // (content-driven later — the shipped walk clip plays every sealed
+        // mob today, multi-clip layering is the named follow-up).
+        Map<String, String> perMobClip =
+                new LinkedHashMap<String, String>();
+        for (String mob : sealedMobs) {
+            perMobClip.put(mob, "animation.beast.walk");
+        }
+        BeastAnimation.sealClip(perMobClip);
+        System.out.println("[MatouBridge] animation wired <" + perMobClip + ">");
         List<String> over = new ArrayList<String>();
         if (OperatorPolicy.present(specs, OperatorPolicy.COMBAT_REACH)) {
             over.add("combat.reach");

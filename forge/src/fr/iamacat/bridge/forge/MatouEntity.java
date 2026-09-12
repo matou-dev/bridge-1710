@@ -1,8 +1,11 @@
 package fr.iamacat.bridge.forge;
 
+import fr.iamacat.bridge.model.BeastAnimation;
 import fr.iamacat.bridge.model.BeastModel;
 import fr.iamacat.spi.hit.BoneBox;
 import fr.iamacat.spi.hit.Hittable;
+import fr.iamacat.spi.model.MatouAnimation;
+import fr.iamacat.spi.model.Molang;
 import java.util.List;
 import java.util.Map;
 import net.minecraft.entity.Entity;
@@ -145,8 +148,19 @@ public final class MatouEntity extends EntityPig implements Hittable {
         // the vanilla EntityPig link — hub decisions/LOOT.md): inherited
         // vanilla members go through the declaring stub type (Entity),
         // never the beast.
+        // Animation tranche (hub decisions/MATOU_ANIMATION.md): the boxes
+        // ride the sealed clip pose (head shots meet the turned head),
+        // never bind. Clock is the entity age (ticksExisted / 20);
+        // modified_distance_moved reads 0.0 until the walk-phase driver
+        // lands (named follow-up — the shipped walk clip drives its head
+        // off life_time and its body off keyframes, so E0 already moves).
         Entity self = this;
-        return BeastModel.cached().boxesAt(self.posX, self.posY, self.posZ);
+        double t = self.ticksExisted / 20.0;
+        Molang.Ctx ctx = new Molang.Ctx(t, t, 0.0, 0.05, null);
+        MatouAnimation.AnimPose pose = BeastAnimation.poseFor(
+                mobOrFirst(), t, ctx);
+        return BeastModel.cached().model().placedPosedBoxes(
+                self.posX, self.posY, self.posZ, pose);
     }
 
     @Override

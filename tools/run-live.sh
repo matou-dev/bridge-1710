@@ -133,6 +133,11 @@ pin_field "net/minecraft/entity/Entity/lastTickPosY"
 pin_field "net/minecraft/entity/Entity/lastTickPosZ"
 pin_field "net/minecraft/entity/Entity/rotationYaw"
 pin_field "net/minecraft/entity/Entity/rotationPitch"
+# Animation tranche (hub decisions/MATOU_ANIMATION.md, posed hitboxes on
+# the entity-age clock — ported from the 1122 lead): the walk-clock
+# field, owner Entity, same searge as every row above (this pin IS the
+# map on the full-map era — no want.tsv exists on 1710).
+pin_field "net/minecraft/entity/Entity/ticksExisted"
 # Combat tranche (hub decisions/VIRTUAL_HITBOXES.md, server weakspot hook
 # — ported from the 1122 lead): the attacker eye/look surface plus the
 # look components. 1614-native notes: DamageSource.getEntity is the
@@ -345,8 +350,9 @@ if [ "${BUILD_ONLY:-}" = "1" ]; then
   cp ../example1/content/owned.matou ../example1/content/additive.matou ../example1/content/structure.matou ../example1/content/vein.matou dist/matou-content/
   cp tools/live/my_beast.geo.json dist/my_beast.geo.json
   cp tools/live/my_beast.png dist/my_beast.png
+  cp tools/live/my_beast.animation.json dist/my_beast.animation.json
   printf '# Copy to <server>/config/matoubridge/packs.cfg and replace <SERVER>.\n# Wire y=63 keeps plane cells on their own slice, off the structure slices (64..65).\n# The wire block is the registered custom ore (preInit registers example1:my_ore from owned.matou); aliases stay vanilla stone.\n# Vein clusters land on the BASE_Y=60 band (slices 60..61) as the registered ore via the veinblock alias.\nfr.iamacat.example1.ExamplePack 63 example1:my_ore ownedFile=<SERVER>/matou-content/owned.matou scatterFile=<SERVER>/matou-content/additive.matou structureFile=<SERVER>/matou-content/structure.matou block.example1.structures:hut_wall=minecraft:stone block.example1.structures:hut_roof=minecraft:stone veinFile=<SERVER>/matou-content/vein.matou veinblock.example1.content:my_ore=example1:my_ore\n' > dist/packs.cfg.example
-  (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou matou-content/structure.matou matou-content/vein.matou packs.cfg.example my_beast.geo.json my_beast.png > SHA256SUMS.txt)
+  (cd dist && sha256sum "matou-spi-$VERSION.jar" "matou-example1-$VERSION.jar" "matou-minimap-$VERSION.jar" "matoubridge-$VERSION.jar" matou-content/owned.matou matou-content/additive.matou matou-content/structure.matou matou-content/vein.matou packs.cfg.example my_beast.geo.json my_beast.png my_beast.animation.json > SHA256SUMS.txt)
   (cd dist && sha256sum -c SHA256SUMS.txt)
   echo "ok r2-release : dist/ assembled (VERSION=$VERSION)"
   exit 0
@@ -378,6 +384,10 @@ cp "$GEO_SRC" "$SERV/config/matoubridge/my_beast.geo.json"
 # decisions/MATOU_MODEL.md). Deployed beside the geometry,
 # operator-replaceable like it.
 cp tools/live/my_beast.png "$SERV/config/matoubridge/my_beast.png"
+# Beast animation: the shipped walk clip the skinned renderer poses and
+# the hitboxes ride (hub decisions/MATOU_ANIMATION.md, ported from
+# 1122). Deployed beside the geometry, operator-replaceable like it.
+cp tools/live/my_beast.animation.json "$SERV/config/matoubridge/my_beast.animation.json"
 echo "eula=true" > "$SERV/eula.txt"
 printf 'online-mode=false\nlevel-type=FLAT\ngamemode=1\ndifficulty=0\nmotd=B3 live proof\nmax-tick-time=-1\n' > "$SERV/server.properties"
 rm -rf "$SERV/world" "$SERV/logs"
@@ -387,8 +397,11 @@ live_boot "$SERV" "$BOOT_SECS" "boot-b3.log" "$J8/java" -Xmx1G -jar "$UNI" nogui
 # here since the model tranche (same as 1122: the server ignores the geo
 # cleanly, any server-side model refusal fails loudly instead of passing
 # silently). E_HIT rides it since the combat tranche (same as 1122: the
-# hook refuses corrupt attacker state loudly out of SPI).
-live_verdict "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|E_HIT\|Encountered an unexpected exception" "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|E_HIT\|Caused by" "$SERV/boot-b3.log"
+# hook refuses corrupt attacker state loudly out of SPI). E_ANIM rides
+# it as well: the posed hitboxes evaluate the sealed clip server-side
+# (hub decisions/MATOU_ANIMATION.md) — an animation refusal on the
+# server is a no-regression breach, never a silent bind fallback.
+live_verdict "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|E_HIT\|E_ANIM\|Encountered an unexpected exception" "NoSuchMethodError\|NoSuchFieldError\|E_FORGE\|E_BRIDGE\|E_EXAMPLE\|E_REG\|E_LOOT\|E_SPAWN\|E_MODEL\|E_HIT\|E_ANIM\|Caused by" "$SERV/boot-b3.log"
 
 # 7. Positive proof: world blocks in chunks (0..1, -1..1) at y=60..61
 #    plus y=63..65 must equal the pure decision union — nothing foreign,

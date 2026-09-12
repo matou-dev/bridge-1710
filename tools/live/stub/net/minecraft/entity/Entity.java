@@ -39,6 +39,13 @@ public class Entity {
     public float rotationYaw;
     public float rotationPitch;
     public boolean isDead;
+    /**
+     * Animation compile stub: 1614 {@code Entity} declares the age
+     * counter the skinned renderer and posed hitboxes read for the clip
+     * clock ({@code ticksExisted}, pinned to the 1.7.10 SRG by
+     * tools/run-live.sh like every other Entity row above). Never runs.
+     */
+    public int ticksExisted;
 
     public void setPositionAndRotation(double x, double y, double z,
             float yaw, float pitch) {
