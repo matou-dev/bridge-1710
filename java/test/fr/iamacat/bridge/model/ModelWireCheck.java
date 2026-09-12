@@ -49,6 +49,7 @@ public final class ModelWireCheck {
 
     public static void main(String[] args) throws Exception {
         testShippedAsset();
+        testRotatedAsset();
         testShippedTexture();
         testTempRoundtrip();
         testRefusals();
@@ -101,6 +102,65 @@ public final class ModelWireCheck {
                 "per-mob head weakspot 2x");
         check(BeastModel.combatReach("my_beast") == 4.0d,
                 "per-mob reach 4.0");
+    }
+
+    /**
+     * Rotated-content battery (rotation live-proof tranche, hub
+     * decisions/MATOU_MODEL.md, ported from 1122): the proof asset is
+     * the shipped beast plus a head-bone yaw of 45 degrees. The body
+     * bakes bit-identical, the head mesh moves, and its box widens
+     * conservatively over the rotated shape (never less) while the ray
+     * still resolves the head. UVs and the texture grid are untouched.
+     */
+    private static void testRotatedAsset() throws Exception {
+        BeastModel shipped = BeastModel.load("tools/live/my_beast.geo.json");
+        BeastModel rotated = BeastModel.load("tools/live/my_beast_rotated.geo.json");
+        check(rotated.model().identifier.equals("geometry.my_beast"), "rotated identifier");
+        check(rotated.model().bones.size() == 2
+                && rotated.model().bones.get(0).name.equals("body")
+                && rotated.model().bones.get(1).name.equals("head"),
+                "rotated bones body+head");
+        float[] a = shipped.mesh();
+        float[] b = rotated.mesh();
+        check(b.length == a.length
+                && b.length == rotated.model().cubeCount() * 36 * MatouModel.VERTEX_STRIDE,
+                "rotated mesh = cubes x 36 stride-8 vertices");
+        check(Math.abs(b[0] - (-0.5f)) < 1e-6
+                && Math.abs(b[1]) < 1e-6
+                && Math.abs(b[2] - 0.5f) < 1e-6,
+                "rotated mesh first vertex = unrotated body front corner");
+        check(!Arrays.equals(a, b), "head yaw moves mesh vertices");
+        List<BoneBox> sa = shipped.boxesAt(0.0, 0.0, 0.0);
+        List<BoneBox> ra = rotated.boxesAt(0.0, 0.0, 0.0);
+        check(ra.size() == 2, "two rotated placed boxes");
+        check(ra.get(0).box.minX == sa.get(0).box.minX
+                && ra.get(0).box.maxX == sa.get(0).box.maxX
+                && ra.get(0).box.minY == sa.get(0).box.minY
+                && ra.get(0).box.maxY == sa.get(0).box.maxY
+                && ra.get(0).box.minZ == sa.get(0).box.minZ
+                && ra.get(0).box.maxZ == sa.get(0).box.maxZ,
+                "unrotated body box is bit-identical");
+        check(ra.get(1).box.minX <= sa.get(1).box.minX
+                && ra.get(1).box.maxX >= sa.get(1).box.maxX
+                && ra.get(1).box.minZ <= sa.get(1).box.minZ
+                && ra.get(1).box.maxZ >= sa.get(1).box.maxZ,
+                "rotated head box covers the unrotated head box");
+        check(ra.get(1).box.minX < sa.get(1).box.minX
+                && ra.get(1).box.maxX > sa.get(1).box.maxX,
+                "45-degree yaw strictly widens the head box");
+        check(Math.abs(ra.get(1).box.minX - (-0.397747564417433)) < 1e-9
+                && Math.abs(ra.get(1).box.maxX - 0.397747564417433) < 1e-9
+                && Math.abs(ra.get(1).box.minY - 0.96875) < 1e-9
+                && Math.abs(ra.get(1).box.maxY - 1.53125) < 1e-9
+                && Math.abs(ra.get(1).box.minZ - (-0.397747564417433)) < 1e-9
+                && Math.abs(ra.get(1).box.maxZ - 0.397747564417433) < 1e-9,
+                "rotated head box golden (45-degree yaw widens 9px to 4.5*sqrt(2))");
+        RayHit head = HitTester.test(ra,
+                new Vec3d(0.0, 1.25, 2.0), new Vec3d(0.0, 0.0, -1.0), 10.0);
+        check(head != null && head.boneName.equals("head"), "pure ray resolves rotated head");
+        BeastTexture tex = BeastTexture.load("tools/live/my_beast.png",
+                rotated.model().textureWidth, rotated.model().textureHeight);
+        check(tex.width() == 64 && tex.height() == 64, "rotated grid stays 64x64");
     }
 
     private static void testTempRoundtrip() throws Exception {

@@ -368,8 +368,12 @@ printf 'fr.iamacat.example1.ExamplePack 63 example1:my_ore ownedFile=%s/matou-co
 # hitboxes derive from (hub decisions/MATOU_MODEL.md, ported from 1122).
 # Deployed beside packs.cfg, operator-replaceable like it. The server
 # ignores it cleanly (client-only path — zero E_MODEL_* server-side or
-# the step 6 grep below fails loudly).
-cp tools/live/my_beast.geo.json "$SERV/config/matoubridge/my_beast.geo.json"
+# the step 6 grep below fails loudly). ROTATED_GEO overlays the
+# rotated-content proof asset as my_beast.geo.json (rotation live-proof
+# tranche, ported from 1122 — proof-only, never shipped in dist/).
+GEO_SRC="tools/live/my_beast.geo.json"
+[ -n "${ROTATED_GEO:-}" ] && GEO_SRC="$ROTATED_GEO"
+cp "$GEO_SRC" "$SERV/config/matoubridge/my_beast.geo.json"
 # Beast texture: the shipped 64x64 skin the V2 renderer samples (hub
 # decisions/MATOU_MODEL.md). Deployed beside the geometry,
 # operator-replaceable like it.
