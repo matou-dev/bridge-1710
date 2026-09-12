@@ -23,6 +23,7 @@ import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.Entity;
 import net.minecraft.world.World;
+import net.minecraftforge.client.event.RenderWorldEvent;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
 import net.minecraftforge.common.MinecraftForge;
 import org.lwjgl.opengl.GL11;
@@ -94,6 +95,12 @@ public final class InstancedMeshRenderer {
     private final GlBackend backend;
     private boolean initialized;
     private boolean drawLogged;
+    /** Latest camera-valid matrices, captured at chunk-render time (see
+     * {@link #onRenderWorldPre}) in driver column-major order, consumed
+     * by the {@link #onRenderWorldLast} draw of the same frame. */
+    private final float[] frameViewCol = new float[16];
+    private final float[] frameProjCol = new float[16];
+    private boolean haveFrameMatrices;
     private int program;
     private int vao;
     private int meshVbo;
@@ -237,6 +244,31 @@ public final class InstancedMeshRenderer {
         render(event.partialTicks);
     }
 
+    /**
+     * Matrix capture (1614-native, measured live 2026-09-12): the fixed-
+     * function stacks still hold the world camera transform while chunks
+     * render, but by {@link #onRenderWorldLast} time the modelview is
+     * dead (vestigial rotate, ~zero translation — every beast culls, the
+     * textured draw never fires). So the matrices are read here, once per
+     * chunk pass with the latest winning, and the Last draw of the same
+     * frame consumes the stored pair — same pure chain downstream
+     * (transpose once, multiply, seal, decide), only the read point
+     * moves. The event body is never touched (no new member surface —
+     * only the class rides the pin in tools/run-live.sh).
+     */
+    @SubscribeEvent
+    public void onRenderWorldPre(RenderWorldEvent.Pre event) {
+        viewMatrixBuffer.clear();
+        projMatrixBuffer.clear();
+        GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, viewMatrixBuffer);
+        GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, projMatrixBuffer);
+        for (int i = 0; i < 16; i++) {
+            frameViewCol[i] = viewMatrixBuffer.get(i);
+            frameProjCol[i] = projMatrixBuffer.get(i);
+        }
+        haveFrameMatrices = true;
+    }
+
     public void render(float partialTicks) {
         Minecraft mc = Minecraft.getMinecraft();
         if (mc == null || mc.theWorld == null) {
@@ -300,16 +332,28 @@ public final class InstancedMeshRenderer {
             return;
         }
 
-        viewMatrixBuffer.clear();
-        projMatrixBuffer.clear();
-        GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, viewMatrixBuffer);
-        GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, projMatrixBuffer);
+        // No Pre seen yet this session means no rendered frame preceded
+        // this draw (chunk rendering always fires Pre first) — skip the
+        // frame rather than cull against a zero matrix pair.
+        if (!haveFrameMatrices) {
+            return;
+        }
         // Same GL era as the derived path (hub
-        // decisions/GPU_INSTANCING.md): fixed-function matrices read
+        // decisions/GPU_INSTANCING.md): fixed-function matrices arrive
         // column-major, transposed and multiplied once, purely, into
-        // the row-major product the plan consumes.
-        float[] vp = ViewProjection.vpRowMajor(colMajor(viewMatrixBuffer),
-                colMajor(projMatrixBuffer));
+        // the row-major product the plan consumes. The pair is the
+        // Pre-captured one above, never a Last-time re-read (dead on
+        // 1614 — see onRenderWorldPre).
+        float[] vp = ViewProjection.vpRowMajor(frameViewCol, frameProjCol);
+        // The draw uniforms ride the same captured pair (a Last-time
+        // buffer re-read would upload the dead modelview and misplace
+        // every instance the cull just kept).
+        viewMatrixBuffer.clear();
+        viewMatrixBuffer.put(frameViewCol);
+        viewMatrixBuffer.flip();
+        projMatrixBuffer.clear();
+        projMatrixBuffer.put(frameProjCol);
+        projMatrixBuffer.flip();
         Map<MatouId, Object> states = RenderSeal.seal(
                 RenderJob.vocabulary(),
                 new double[] {eyeX, eyeY, eyeZ}, vp, recs);
@@ -395,16 +439,4 @@ public final class InstancedMeshRenderer {
         backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, 0);
     }
 
-    /**
-     * Reads back 16 column-major floats without moving the buffer
-     * position (the uniform upload below reads the same buffer
-     * afterwards — an absolute get disturbs nothing).
-     */
-    private static float[] colMajor(FloatBuffer buf) {
-        float[] m = new float[16];
-        for (int i = 0; i < 16; i++) {
-            m[i] = buf.get(i);
-        }
-        return m;
-    }
 }

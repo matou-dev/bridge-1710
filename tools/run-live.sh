@@ -228,6 +228,13 @@ pin_uni 'cpw.mods.fml.common.event.FMLPreInitializationEvent' 'FMLPreInitializat
 # same as every row above; 1614 carries partialTicks as a public field,
 # measured via javap on this same universal).
 pin_uni 'net.minecraftforge.client.event.RenderWorldLastEvent' 'partialTicks'
+# Matrix-capture tranche (measured live 2026-09-12: the modelview stack
+# is dead by Last time on 1614, so the overlay captures both matrices
+# at chunk-render time instead): the per-pass chunk event, posted by
+# ForgeHooksClient.onPreRenderWorld around chunk rendering while the
+# camera transform is still active. The handler reads no member — only
+# the class rides the pin.
+pin_uni 'net.minecraftforge.client.event.RenderWorldEvent$Pre' 'Pre('
 echo "ok b3-live : forge stubs pinned to universal"
 
 # 3. Build all mod jars with Java 8. forge/ compiles against the pinned

@@ -63,3 +63,13 @@ F net/minecraft/init/Items diamond field_151045_i
 M net/minecraft/entity/player/EntityPlayer attackTargetEntityWithCurrentItem func_71059_n (Lnet/minecraft/entity/Entity;)V 0
 M net/minecraft/entity/EntityLivingBase getHealth func_110143_aJ ()F 0
 M net/minecraft/entity/Entity getEyeHeight func_70047_e ()F 0
+# Camera follow (1614-native, measured on the vanilla /tp bytecode):
+# EntityPlayerMP never self-syncs (no S08 inside setPositionAndRotation
+# — verified by javap on mw), so a bare setPositionAndRotation leaves
+# the client camera behind while the fight happens on the roofs. Vanilla
+# /tp completes the move with playerNetServerHandler.setPlayerLocation
+# (server move plus S08 with eye height) — same two refs here, so the
+# client stares at the struck head and the instanced overlay draws
+# against live matrices. Same searge practice.
+F net/minecraft/entity/player/EntityPlayerMP playerNetServerHandler field_71135_a
+M net/minecraft/network/NetHandlerPlayServer setPlayerLocation func_147364_a (DDDFF)V 0

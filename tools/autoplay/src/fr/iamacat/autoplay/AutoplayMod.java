@@ -21,6 +21,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.init.Items;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -946,7 +947,17 @@ public class AutoplayMod {
         } else {
             combatHpBeforeBeast = living.getHealth();
         }
-        pbody.setPositionAndRotation(px, py, pz, yaw, pitch);
+        // Camera follow (1614-native, measured on the vanilla /tp
+        // bytecode — CommandTeleport calls exactly this, never
+        // setPositionAndRotation alone): EntityPlayerMP never self-syncs
+        // (no S08 in a bare setPositionAndRotation — verified by javap
+        // on mw), so without this the client camera stays on the ground
+        // while the fight happens on the roofs and the overlay correctly
+        // culls everything. setPlayerLocation moves the server player
+        // AND delivers the S08 (with eye height), so the client stares
+        // at the struck head from here on.
+        ((EntityPlayerMP) player).playerNetServerHandler
+                .setPlayerLocation(px, py, pz, yaw, pitch);
         player.attackTargetEntityWithCurrentItem(beast);
         if ("my_brute".equals(mob)) {
             combatTickBrute = worldTicks;
