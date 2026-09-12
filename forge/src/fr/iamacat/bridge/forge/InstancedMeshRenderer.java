@@ -3,14 +3,22 @@ package fr.iamacat.bridge.forge;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
+import fr.iamacat.bridge.ForgeSnapshot;
 import fr.iamacat.bridge.model.BeastModel;
+import fr.iamacat.bridge.render.RenderJob;
+import fr.iamacat.bridge.render.RenderSeal;
+import fr.iamacat.spi.MatouId;
 import fr.iamacat.spi.model.MatouModel;
 import fr.iamacat.spi.render.GlBackend;
+import fr.iamacat.spi.render.InstanceBucket.Rec;
 import fr.iamacat.spi.render.InstanceFormat;
+import fr.iamacat.spi.render.ViewProjection;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.Entity;
 import net.minecraft.world.World;
@@ -91,6 +99,16 @@ public final class InstancedMeshRenderer {
     private final FloatBuffer viewMatrixBuffer;
     private final FloatBuffer projMatrixBuffer;
     private FloatBuffer instanceBuffer;
+    /** Flat-tint texture key: the V1 shader tints and ignores UVs by
+     * decision (hub decisions/GL_INSTANCING_ADAPTER.md) — per-face
+     * sampling plugs its own key here (V2 re-opener, hub
+     * decisions/MATOU_MODEL.md). */
+    private static final String TEXTURE_TINT = "tint";
+    private static final RenderJob RENDER_JOB = new RenderJob();
+    /** Client frame sequence carried by the render snapshot (the job
+     * ignores the tick — no addressed randomness on this path — but a
+     * snapshot refuses a negative one, so the frames number it). */
+    private long frame;
 
     private InstancedMeshRenderer() {
         this.backend = new Lwjgl2Backend();
@@ -225,10 +243,77 @@ public final class InstancedMeshRenderer {
         double eyeY = view.lastTickPosY + (view.posY - view.lastTickPosY) * partialTicks;
         double eyeZ = view.lastTickPosZ + (view.posZ - view.lastTickPosZ) * partialTicks;
 
-        int count = 0;
-        instanceBuffer.clear();
+        // Render-plan tranche (hub decisions/GPU_INSTANCING.md): every
+        // drawn beast rides a sealed instance record through the pure
+        // plan — frustum-culled records never reach the upload, never
+        // silently. Model keys are mob-addressed (one bucket per mob
+        // today over the single shared mesh — per-mob meshes plug into
+        // the same keys), radii bound the sealed hitboxes (the cull
+        // never clips a limb the hit-tester still serves).
+        List<Rec> recs = new ArrayList<Rec>();
+        List<MatouEntity> beasts = new ArrayList<MatouEntity>();
         for (Entity e : list) {
             if (e instanceof MatouEntity && !e.isDead) {
+                MatouEntity beast = (MatouEntity) e;
+                double entX = e.lastTickPosX + (e.posX - e.lastTickPosX) * partialTicks;
+                double entY = e.lastTickPosY + (e.posY - e.lastTickPosY) * partialTicks;
+                double entZ = e.lastTickPosZ + (e.posZ - e.lastTickPosZ) * partialTicks;
+                float radius = RenderSeal.boundRadius(beast.hitBoxes(),
+                        e.posX, e.posY, e.posZ);
+                recs.add(new Rec(beast.mobOrFirst(), TEXTURE_TINT,
+                        entX, entY, entZ, radius, e.rotationYaw));
+                beasts.add(beast);
+            }
+        }
+
+        if (recs.isEmpty()) {
+            return;
+        }
+
+        viewMatrixBuffer.clear();
+        projMatrixBuffer.clear();
+        GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, viewMatrixBuffer);
+        GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, projMatrixBuffer);
+        // Same GL era as the derived path (hub
+        // decisions/GPU_INSTANCING.md): fixed-function matrices read
+        // column-major, transposed and multiplied once, purely, into
+        // the row-major product the plan consumes.
+        float[] vp = ViewProjection.vpRowMajor(colMajor(viewMatrixBuffer),
+                colMajor(projMatrixBuffer));
+        Map<MatouId, Object> states = RenderSeal.seal(
+                RenderJob.vocabulary(),
+                new double[] {eyeX, eyeY, eyeZ}, vp, recs);
+        Map<String, List<Integer>> buckets = RENDER_JOB.decide(
+                ForgeSnapshot.snapshot(frame++, states));
+
+        if (buckets.isEmpty()) {
+            return;
+        }
+        int total = 0;
+        for (List<Integer> bucket : buckets.values()) {
+            total += bucket.size();
+        }
+
+        GL11.glEnable(GL11.GL_DEPTH_TEST);
+        GL11.glDepthMask(true);
+        GL11.glEnable(GL11.GL_CULL_FACE);
+        GL11.glCullFace(GL11.GL_BACK);
+
+        backend.useProgram(program);
+        backend.uniformMatrix4fv(uProjLoc, false, projMatrixBuffer);
+        backend.uniformMatrix4fv(uViewLoc, false, viewMatrixBuffer);
+
+        backend.bindVertexArray(vao);
+        // One instanced draw per planned bucket (the GPU execution
+        // order InstanceBucket.plan proves): the buffer is repacked per
+        // bucket, so a culled bucket costs nothing and a visible one
+        // binds once.
+        for (Map.Entry<String, List<Integer>> bucket
+                : buckets.entrySet()) {
+            instanceBuffer.clear();
+            for (Integer index : bucket.getValue()) {
+                MatouEntity beast = beasts.get(index.intValue());
+                Entity e = beast;
                 if (instanceBuffer.remaining() < InstanceFormat.FLOATS_PER_INSTANCE) {
                     FloatBuffer expanded = ByteBuffer.allocateDirect(instanceBuffer.capacity() * 2 * 4)
                             .order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -247,54 +332,46 @@ public final class InstancedMeshRenderer {
                         yaw, pitch, 1.0f,
                         1.0f, 0.7f, 0.7f, 1.0f,
                         0.0f, 0.0f);
-                count++;
             }
-        }
-
-        if (count == 0) {
-            return;
-        }
-        instanceBuffer.flip();
-
-        viewMatrixBuffer.clear();
-        projMatrixBuffer.clear();
-        GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, viewMatrixBuffer);
-        GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, projMatrixBuffer);
-
-        backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, instanceVbo);
-        backend.bufferData(GlBackend.GL_ARRAY_BUFFER, instanceBuffer, GlBackend.GL_STREAM_DRAW);
-
-        GL11.glEnable(GL11.GL_DEPTH_TEST);
-        GL11.glDepthMask(true);
-        GL11.glEnable(GL11.GL_CULL_FACE);
-        GL11.glCullFace(GL11.GL_BACK);
-
-        backend.useProgram(program);
-        backend.uniformMatrix4fv(uProjLoc, false, projMatrixBuffer);
-        backend.uniformMatrix4fv(uViewLoc, false, viewMatrixBuffer);
-
-        backend.bindVertexArray(vao);
-        // Draw-proof discipline (hub decisions/MATOU_MODEL.md, visual
-        // tranche): pre-existing GL errors belong to the shared context
-        // (MC's own state may carry some) — drain them so only this draw
-        // is judged, then refuse loudly if GL rejects it. A rejected draw
-        // that still logged "drew" would be a silent pass.
-        while (GL11.glGetError() != GL11.GL_NO_ERROR) {
-        }
-        backend.drawArraysInstanced(GlBackend.GL_TRIANGLES, 0, vertexCount, count);
-        int glErr = GL11.glGetError();
-        if (glErr != GL11.GL_NO_ERROR) {
-            throw new IllegalStateException("E_GL_DRAW:failed <" + glErr
-                    + "> (instanced beast draw rejected — see hub decisions/GL_INSTANCING_ADAPTER.md)");
+            instanceBuffer.flip();
+            backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, instanceVbo);
+            backend.bufferData(GlBackend.GL_ARRAY_BUFFER, instanceBuffer, GlBackend.GL_STREAM_DRAW);
+            // Draw-proof discipline (hub decisions/MATOU_MODEL.md, visual
+            // tranche): pre-existing GL errors belong to the shared context
+            // (MC's own state may carry some) — drain them so only this draw
+            // is judged, then refuse loudly if GL rejects it. A rejected draw
+            // that still logged "drew" would be a silent pass.
+            while (GL11.glGetError() != GL11.GL_NO_ERROR) {
+            }
+            backend.drawArraysInstanced(GlBackend.GL_TRIANGLES, 0, vertexCount, bucket.getValue().size());
+            int glErr = GL11.glGetError();
+            if (glErr != GL11.GL_NO_ERROR) {
+                throw new IllegalStateException("E_GL_DRAW:failed <" + glErr
+                        + "> (instanced beast draw rejected — see hub decisions/GL_INSTANCING_ADAPTER.md)");
+            }
         }
         if (!drawLogged) {
             drawLogged = true;
-            System.out.println("[MatouRenderer] drew instances=" + count
-                    + " mesh=" + vertexCount + " verts");
+            System.out.println("[MatouRenderer] drew instances=" + total
+                    + " mesh=" + vertexCount + " verts"
+                    + " buckets=" + buckets.size());
         }
 
         backend.bindVertexArray(0);
         backend.useProgram(0);
         backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, 0);
+    }
+
+    /**
+     * Reads back 16 column-major floats without moving the buffer
+     * position (the uniform upload below reads the same buffer
+     * afterwards — an absolute get disturbs nothing).
+     */
+    private static float[] colMajor(FloatBuffer buf) {
+        float[] m = new float[16];
+        for (int i = 0; i < 16; i++) {
+            m[i] = buf.get(i);
+        }
+        return m;
     }
 }

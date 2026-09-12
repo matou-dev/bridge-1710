@@ -77,6 +77,7 @@ java -cp java/build fr.iamacat.bridge.spike.RepopCheck
 java -cp java/build fr.iamacat.bridge.loot.LootCheck
 java -cp java/build fr.iamacat.bridge.spawn.SpawnCheck
 java -cp java/build fr.iamacat.bridge.model.ModelWireCheck
+java -cp java/build fr.iamacat.bridge.render.RenderWireCheck
 # Etage 2 : forge/ seul touche MC/Forge (10.13.4.1614). Stub shape-only,
 # pas de MC_JAR requis : vert partout, le live B3 prouve contre le vrai
 # jar (etage 3, LIVE=1). Porte du pattern 1122 (forge-2860-stub).
