@@ -55,6 +55,7 @@ public final class ModelWireCheck {
         testRotatedAsset();
         testShippedTexture();
         testShippedAnimation();
+        testWalkPhaseDriver();
         testTempRoundtrip();
         testRefusals();
         testCombatReachOverride();
@@ -275,6 +276,46 @@ public final class ModelWireCheck {
                 .evaluate(0.0, Molang.zeroCtx());
         assertThrows(() -> shipped.model().poseDeltaMatrices(legPose),
                 "E_ANIM_BONE:unknown");
+    }
+
+    /**
+     * Walk-phase driver battery (hub decisions/MATOU_ANIMATION.md): the
+     * holder builds the eval context from the per-mob distance (age
+     * still rides anim_time + life_time, the tick step stays fixed)
+     * and the render path interpolates prev-to-cur over partialTicks —
+     * a dist-driven channel phases with distance while the shipped
+     * life-driven head is untouched. Pure, zero MC.
+     */
+    private static void testWalkPhaseDriver() {
+        Molang.Ctx ctx = BeastAnimation.animCtx(1.0, 2.0);
+        check(Math.abs(ctx.animTime - 1.0) < 1e-12
+                && Math.abs(ctx.lifeTime - 1.0) < 1e-12
+                && Math.abs(ctx.distMoved - 2.0) < 1e-12
+                && Math.abs(ctx.deltaTime - 0.05) < 1e-12,
+                "animCtx carries age as time and distance as distMoved");
+        check(Math.abs(BeastAnimation.interpDistMoved(0.0, 10.0, 0.5) - 5.0) < 1e-12,
+                "walk distance interpolates at half ticks");
+        check(Math.abs(BeastAnimation.interpDistMoved(3.0, 3.0, 0.7) - 3.0) < 1e-12,
+                "standing mob holds its distance");
+        check(Math.abs(BeastAnimation.interpDistMoved(0.0, 10.0, 0.0)) < 1e-12
+                && Math.abs(BeastAnimation.interpDistMoved(0.0, 10.0, 1.0) - 10.0) < 1e-12,
+                "walk distance eases from prev to cur across the tick");
+        Map<String, MatouAnimation> strut = MatouAnimationParser.parse(
+                "{\"format_version\": \"1.10.0\", \"animations\": {"
+                + "\"animation.beast.strut\": {\"loop\": true,"
+                + " \"animation_length\": 1.0,"
+                + " \"bones\": {\"head\": {\"rotation\": "
+                + "[\"math.sin(query.modified_distance_moved * 3.0) * 30.0\", 0.0, 0.0]}}}}}");
+        MatouAnimation strutClip = strut.get("animation.beast.strut");
+        Molang.Ctx stood = BeastAnimation.animCtx(0.0, 0.0);
+        check(Math.abs(strutClip.evaluate(0.0, stood).bones.get("head").rotX) < 1e-9,
+                "dist-driven channel rests at zero distance");
+        Molang.Ctx strode = BeastAnimation.animCtx(0.0, Math.PI / 6.0);
+        check(Math.abs(strutClip.evaluate(0.0, strode).bones.get("head").rotX - 30.0) < 1e-9,
+                "dist-driven channel reaches +30 at dist pi/6");
+        Molang.Ctx zero = new Molang.Ctx(0.0, 0.0, 0.0, 0.05, null);
+        check(Math.abs(strutClip.evaluate(0.0, zero).bones.get("head").rotX) < 1e-9,
+                "zero ctx still rests (wiring-only: shipped clip untouched)");
     }
 
     private static void testTempRoundtrip() throws Exception {

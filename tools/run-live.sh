@@ -138,6 +138,13 @@ pin_field "net/minecraft/entity/Entity/rotationPitch"
 # field, owner Entity, same searge as every row above (this pin IS the
 # map on the full-map era — no want.tsv exists on 1710).
 pin_field "net/minecraft/entity/Entity/ticksExisted"
+# Walk-phase driver tranche (same decision file, ported from the 1122
+# lead 4473ee2): the per-mob distance clock feeding
+# query.modified_distance_moved (field_70140_Q F +
+# field_70141_P F, renderer interpolates prev-to-cur over partialTicks,
+# hitboxes read cur — full-map era, these pins ARE the map).
+pin_field "net/minecraft/entity/Entity/distanceWalkedModified"
+pin_field "net/minecraft/entity/Entity/prevDistanceWalkedModified"
 # Combat tranche (hub decisions/VIRTUAL_HITBOXES.md, server weakspot hook
 # — ported from the 1122 lead): the attacker eye/look surface plus the
 # look components. 1614-native notes: DamageSource.getEntity is the

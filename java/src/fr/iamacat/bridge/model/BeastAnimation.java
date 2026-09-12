@@ -131,6 +131,33 @@ public final class BeastAnimation {
     }
 
     /**
+     * Walk-phase eval context (hub decisions/MATOU_ANIMATION.md,
+     * walk-phase driver tranche): the clip clock stays the entity age
+     * ({@code time} rides both {@code anim_time} and {@code life_time},
+     * same as before) while {@code query.modified_distance_moved} reads
+     * the caller's per-mob distance ({@code distMoved} in blocks, the
+     * vanilla {@code distanceWalkedModified} counter on the entity, or
+     * its partialTicks interpolation on the render path). {@code delta}
+     * stays the fixed tick step. Pure — the gate battery covers it
+     * without MC.
+     */
+    public static Molang.Ctx animCtx(double time, double distMoved) {
+        return new Molang.Ctx(time, time, distMoved, 0.05, null);
+    }
+
+    /**
+     * Per-frame walk-distance interpolation (render path only): the
+     * previous-tick counter eased toward the current one over
+     * {@code partialTicks}, same shape as the position interpolation
+     * beside it. Pure — hitboxes read the current tick value directly,
+     * never through here.
+     */
+    public static double interpDistMoved(double prev, double cur,
+            double partialTicks) {
+        return prev + (cur - prev) * partialTicks;
+    }
+
+    /**
      * Evaluated pose for one mob at caller time (s) — pure, delegates
      * to the sealed clip (SPI single-clip eval, never multi-clip).
      */

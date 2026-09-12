@@ -46,6 +46,20 @@ public class Entity {
      * tools/run-live.sh like every other Entity row above). Never runs.
      */
     public int ticksExisted;
+    /**
+     * Walk-phase compile stub (hub decisions/MATOU_ANIMATION.md,
+     * walk-phase driver tranche): 1614 {@code Entity} declares the
+     * cumulative walk-distance counters the skinned renderer and posed
+     * hitboxes feed to {@code query.modified_distance_moved}
+     * ({@code distanceWalkedModified} is {@code field_70140_Q F} and
+     * {@code prevDistanceWalkedModified} is {@code field_70141_P F},
+     * both measured against the pinned 1614 SRG like every other
+     * Entity row in tools/run-live.sh). The renderer interpolates
+     * prev-to-cur over partialTicks, the hitboxes read the current
+     * tick value. Never runs.
+     */
+    public float distanceWalkedModified;
+    public float prevDistanceWalkedModified;
 
     public void setPositionAndRotation(double x, double y, double z,
             float yaw, float pitch) {

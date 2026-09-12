@@ -490,7 +490,10 @@ public final class InstancedMeshRenderer {
                         1.0f, 0.7f, 0.7f, 1.0f,
                         0.0f, 0.0f);
                 double t = e.ticksExisted / 20.0;
-                Molang.Ctx ctx = new Molang.Ctx(t, t, 0.0, 0.05, null);
+                double dist = BeastAnimation.interpDistMoved(
+                        e.prevDistanceWalkedModified,
+                        e.distanceWalkedModified, partialTicks);
+                Molang.Ctx ctx = BeastAnimation.animCtx(t, dist);
                 MatouAnimation.AnimPose pose = BeastAnimation.poseFor(
                         beast.mobOrFirst(), t, ctx);
                 Map<String, float[]> deltas = skinModel.poseDeltaMatrices(pose);
