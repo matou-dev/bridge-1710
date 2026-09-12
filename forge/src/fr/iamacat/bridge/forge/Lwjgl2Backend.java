@@ -1,6 +1,7 @@
 package fr.iamacat.bridge.forge;
 
 import fr.iamacat.spi.render.GlBackend;
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL15;
@@ -169,5 +170,33 @@ public class Lwjgl2Backend implements GlBackend {
     @Override
     public void drawArraysInstanced(int mode, int first, int count, int instanceCount) {
         GL31.glDrawArraysInstanced(mode, first, count, instanceCount);
+    }
+
+    @Override
+    public int genTextures() {
+        return GL11.glGenTextures();
+    }
+
+    @Override
+    public void bindTexture(int target, int texture) {
+        GL11.glBindTexture(target, texture);
+    }
+
+    @Override
+    public void texImage2D(int target, int level, int internalFormat,
+            int width, int height, int border, int format, int type,
+            ByteBuffer pixels) {
+        GL11.glTexImage2D(target, level, internalFormat, width, height,
+                border, format, type, pixels);
+    }
+
+    @Override
+    public void texParameteri(int target, int pname, int param) {
+        GL11.glTexParameteri(target, pname, param);
+    }
+
+    @Override
+    public void deleteTextures(int texture) {
+        GL11.glDeleteTextures(texture);
     }
 }

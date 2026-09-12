@@ -1,5 +1,6 @@
 package org.lwjgl.opengl;
 
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 
 /**
@@ -32,4 +33,16 @@ public class GL11 {
     public static void glCullFace(int mode) {}
     public static void glBlendFunc(int sfactor, int dfactor) {}
     public static void glGetFloat(int pname, FloatBuffer params) {}
+
+    // Core GL11 texture upload (V2 tranche): same signatures on every
+    // LWJGL 2.x (glGenTextures/glBindTexture/glTexImage2D with the border
+    // arg/glTexParameteri/glDeleteTextures) — the live proof links them
+    // against the provisioned 2.9.4-era bytes, never this stub.
+    public static int glGenTextures() { return 0; }
+    public static void glBindTexture(int target, int texture) {}
+    public static void glTexImage2D(int target, int level, int internalFormat,
+            int width, int height, int border, int format, int type,
+            ByteBuffer pixels) {}
+    public static void glTexParameteri(int target, int pname, int param) {}
+    public static void glDeleteTextures(int texture) {}
 }
