@@ -4,6 +4,7 @@ import fr.iamacat.spi.render.GlBackend;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL13;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL20;
 import org.lwjgl.opengl.GL30;
@@ -175,6 +176,11 @@ public class Lwjgl2Backend implements GlBackend {
     @Override
     public int genTextures() {
         return GL11.glGenTextures();
+    }
+
+    @Override
+    public void activeTexture(int texture) {
+        GL13.glActiveTexture(texture);
     }
 
     @Override
