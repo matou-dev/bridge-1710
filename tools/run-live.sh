@@ -384,8 +384,12 @@ printf 'fr.iamacat.example1.ExamplePack 63 example1:my_ore ownedFile=%s/matou-co
 # the step 6 grep below fails loudly). ROTATED_GEO overlays the
 # rotated-content proof asset as my_beast.geo.json (rotation live-proof
 # tranche, ported from 1122 — proof-only, never shipped in dist/).
+# TRIPLE_GEO overlays the triple-bone index-2 proof asset the same way
+# (palette index-2 tranche, ported from 1122 — proof-only, never shipped
+# in dist/).
 GEO_SRC="tools/live/my_beast.geo.json"
 [ -n "${ROTATED_GEO:-}" ] && GEO_SRC="$ROTATED_GEO"
+[ -n "${TRIPLE_GEO:-}" ] && GEO_SRC="$TRIPLE_GEO"
 cp "$GEO_SRC" "$SERV/config/matoubridge/my_beast.geo.json"
 # Beast texture: the shipped 64x64 skin the V2 renderer samples (hub
 # decisions/MATOU_MODEL.md). Deployed beside the geometry,
@@ -394,7 +398,11 @@ cp tools/live/my_beast.png "$SERV/config/matoubridge/my_beast.png"
 # Beast animation: the shipped walk clip the skinned renderer poses and
 # the hitboxes ride (hub decisions/MATOU_ANIMATION.md, ported from
 # 1122). Deployed beside the geometry, operator-replaceable like it.
-cp tools/live/my_beast.animation.json "$SERV/config/matoubridge/my_beast.animation.json"
+# TRIPLE_ANIM overlays the triple-bone proof clip the same way (palette
+# index-2 tranche, ported from 1122 — proof-only, never shipped in dist/).
+ANIM_SRC="tools/live/my_beast.animation.json"
+[ -n "${TRIPLE_ANIM:-}" ] && ANIM_SRC="$TRIPLE_ANIM"
+cp "$ANIM_SRC" "$SERV/config/matoubridge/my_beast.animation.json"
 echo "eula=true" > "$SERV/eula.txt"
 printf 'online-mode=false\nlevel-type=FLAT\ngamemode=1\ndifficulty=0\nmotd=B3 live proof\nmax-tick-time=-1\n' > "$SERV/server.properties"
 rm -rf "$SERV/world" "$SERV/logs"

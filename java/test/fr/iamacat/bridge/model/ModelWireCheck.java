@@ -58,6 +58,7 @@ public final class ModelWireCheck {
         testShippedAnimation();
         testWalkPhaseDriver();
         testBonePalette();
+        testTripleFiles();
         testTempRoundtrip();
         testRefusals();
         testCombatReachOverride();
@@ -371,6 +372,76 @@ public final class ModelWireCheck {
         Map<String, float[]> deltas = triple.poseDeltaMatrices(
                 MatouAnimation.AnimPose.identity());
         check(deltas.size() == 3, "three palette matrices");
+    }
+
+    /**
+     * Triple-bone proof battery (palette index-2 tranche, hub
+     * decisions/MATOU_ANIMATION.md, ported from 1122): the proof-only
+     * triple file pair is the shipped beast plus an arm child of the
+     * body, animated by the same walk clip name with an arm channel.
+     * The pair loads, the arm rides file-order index 2, the sealed clip
+     * serves the arm pose, three deltas + three posed boxes flow —
+     * index-2 fetch through the seal, gate-proven (live proves the N=3
+     * draw path). The files swap as a pair: the shipped 2-bone mesh
+     * refuses the triple pose loudly, never silently. Pure, zero MC.
+     */
+    private static void testTripleFiles() throws Exception {
+        BeastModel triple = BeastModel.load(
+                "tools/live/my_beast_triple.geo.json");
+        check(triple.model().identifier.equals("geometry.my_beast"),
+                "triple identifier (drop-in overlay of the shipped beast)");
+        check(triple.model().bones.size() == 3
+                && triple.model().bones.get(0).name.equals("body")
+                && triple.model().bones.get(1).name.equals("head")
+                && triple.model().bones.get(2).name.equals("arm"),
+                "triple bones body+head+arm (file order)");
+        check(BeastAnimation.paletteBonesOrThrow(
+                triple.model().bones.size()) == 3,
+                "three bones admitted");
+        float[] skinned = triple.model().bakeSkinnedMesh();
+        check(skinned.length == triple.model().cubeCount() * 36 * 9,
+                "triple skinned mesh = cubes x 36 stride-9 vertices");
+        check(skinned[8] == 0.0f, "first cube rides bone 0 (body)");
+        check(skinned[36 * 9 + 8] == 1.0f, "second cube rides bone 1 (head)");
+        check(skinned[2 * 36 * 9 + 8] == 2.0f, "third cube rides bone 2 (arm)");
+        BeastAnimation anim = BeastAnimation.load(
+                "tools/live/my_beast_triple.animation.json");
+        check(anim.clips().size() == 1
+                && anim.clips().containsKey("animation.beast.walk"),
+                "triple animation carries the walk clip name");
+        MatouAnimation walk = anim.clips().get("animation.beast.walk");
+        check(Math.abs(walk.length - 0.5) < 1e-12,
+                "triple walk length defaults to last key (shipped keys untouched)");
+        check(walk.bones.size() == 3
+                && walk.bones.containsKey("body")
+                && walk.bones.containsKey("head")
+                && walk.bones.containsKey("arm"),
+                "triple walk animates body+head+arm (channels extended, never altered)");
+        Molang.Ctx at0 = new Molang.Ctx(0.0, 0.0, 0.0, 0.05, null);
+        check(Math.abs(walk.evaluate(0.0, at0).bones.get("arm").rotX) < 1e-9,
+                "triple arm starts at 0");
+        Molang.Ctx atArm = new Molang.Ctx(0.0, Math.PI / 6.0, 0.0, 0.05, null);
+        check(Math.abs(walk.evaluate(0.0, atArm).bones.get("head").rotX - 30.0) < 1e-9,
+                "triple head keeps the shipped +30 at life pi/6");
+        check(Math.abs(walk.evaluate(0.0, atArm).bones.get("arm").rotX - 20.0) < 1e-9,
+                "triple arm reaches +20 at life pi/6");
+        Map<String, String> sel = new LinkedHashMap<String, String>();
+        sel.put("my_beast", "animation.beast.walk");
+        BeastAnimation.sealClip(sel);
+        MatouAnimation.AnimPose poseArm = BeastAnimation.poseFor(
+                anim, "my_beast", 0.0, atArm);
+        check(Math.abs(poseArm.bones.get("arm").rotX - 20.0) < 1e-9,
+                "sealed poseFor drives the arm (index-2 through the seal)");
+        Map<String, float[]> deltas = triple.model().poseDeltaMatrices(poseArm);
+        check(deltas.size() == 3, "three palette matrices");
+        float[] armM = deltas.get("arm");
+        check(Math.abs(armM[5] - 1.0f) > 0.05f, "posed arm delta moves");
+        List<BoneBox> pb = triple.model().placedPosedBoxes(
+                0.0, 0.0, 0.0, poseArm);
+        check(pb.size() == 3, "three posed boxes");
+        BeastModel shipped = BeastModel.load("tools/live/my_beast.geo.json");
+        assertThrows(() -> shipped.model().poseDeltaMatrices(poseArm),
+                "E_ANIM_BONE:unknown");
     }
 
     private static void testTempRoundtrip() throws Exception {
