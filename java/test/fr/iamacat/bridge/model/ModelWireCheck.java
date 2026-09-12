@@ -49,6 +49,7 @@ public final class ModelWireCheck {
 
     public static void main(String[] args) throws Exception {
         testShippedAsset();
+        testShippedTexture();
         testTempRoundtrip();
         testRefusals();
         testCombatReachOverride();
@@ -113,6 +114,36 @@ public final class ModelWireCheck {
         BeastModel probe = BeastModel.load(tmp.toString());
         check(probe.model().identifier.equals("geometry.probe"), "temp asset loads");
         check(probe.boxesAt(0.0, 0.0, 0.0).size() == 1, "temp boxes place");
+        Files.deleteIfExists(tmp);
+    }
+
+    /**
+     * Texture battery (V2 tranche, hub decisions/MATOU_MODEL.md): the
+     * shipped png decodes to the model grid with the painted texels in
+     * PNG-native top-row-first order, and every load failure is coded.
+     */
+    private static void testShippedTexture() throws Exception {
+        BeastTexture tex = BeastTexture.load("tools/live/my_beast.png", 64, 64);
+        check(tex.width() == 64 && tex.height() == 64, "shipped texture is 64x64");
+        byte[] rgba = tex.rgba();
+        check(rgba.length == 64 * 64 * 4, "shipped texels are RGBA");
+        check((rgba[0] & 0xFF) == 63 && (rgba[1] & 0xFF) == 163
+                && (rgba[2] & 0xFF) == 77 && (rgba[3] & 0xFF) == 255,
+                "first texel is the body green (top-row-first, never flipped)");
+        int hi = (40 + 8 * 64) * 4;
+        check((rgba[hi] & 0xFF) == 224 && (rgba[hi + 1] & 0xFF) == 122
+                && (rgba[hi + 2] & 0xFF) == 47,
+                "head texel is orange inside the (32,0) rect");
+        check(tex.uploadBuffer().remaining() == rgba.length, "upload buffer carries all texels");
+        assertThrows(() -> BeastTexture.load(null, 64, 64), "E_MODEL_TEX:null");
+        assertThrows(() -> BeastTexture.load("tools/live/no-such-beast.png", 64, 64),
+                "E_MODEL_TEX:unreadable");
+        assertThrows(() -> BeastTexture.load("tools/live/my_beast.geo.json", 64, 64),
+                "E_MODEL_TEX:unreadable");
+        Path tmp = Files.createTempFile("beast", ".png");
+        javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(
+                8, 8, java.awt.image.BufferedImage.TYPE_INT_ARGB), "png", tmp.toFile());
+        assertThrows(() -> BeastTexture.load(tmp.toString(), 64, 64), "E_MODEL_TEX:dims");
         Files.deleteIfExists(tmp);
     }
 

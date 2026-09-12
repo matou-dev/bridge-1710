@@ -5,6 +5,7 @@ import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
 import fr.iamacat.bridge.ForgeSnapshot;
 import fr.iamacat.bridge.model.BeastModel;
+import fr.iamacat.bridge.model.BeastTexture;
 import fr.iamacat.bridge.render.RenderJob;
 import fr.iamacat.bridge.render.RenderSeal;
 import fr.iamacat.spi.MatouId;
@@ -60,6 +61,7 @@ public final class InstancedMeshRenderer {
             + "uniform mat4 u_view;\n"
             + "out vec4 v_color;\n"
             + "out vec3 v_normal;\n"
+            + "out vec2 v_uv;\n"
             + "void main() {\n"
             + "    float yaw = i_rot_scale.x;\n"
             + "    float scale = i_rot_scale.z;\n"
@@ -71,17 +73,20 @@ public final class InstancedMeshRenderer {
             + "    gl_Position = u_projection * u_view * vec4(worldRelPos, 1.0);\n"
             + "    v_color = i_color;\n"
             + "    v_normal = rotY * a_normal;\n"
+            + "    v_uv = a_uv;\n"
             + "}\n";
 
     private static final String FRAGMENT_SHADER =
             "#version 330 core\n"
             + "in vec4 v_color;\n"
             + "in vec3 v_normal;\n"
+            + "in vec2 v_uv;\n"
+            + "uniform sampler2D u_tex;\n"
             + "out vec4 fragColor;\n"
             + "void main() {\n"
             + "    vec3 lightDir = normalize(vec3(0.2, 1.0, -0.7));\n"
             + "    float diff = max(dot(v_normal, lightDir), 0.0) * 0.4 + 0.6;\n"
-            + "    vec4 col = v_color;\n"
+            + "    vec4 col = texture(u_tex, v_uv) * v_color;\n"
             + "    col.rgb *= diff;\n"
             + "    fragColor = col;\n"
             + "}\n";
@@ -96,13 +101,15 @@ public final class InstancedMeshRenderer {
     private int vertexCount;
     private int uProjLoc;
     private int uViewLoc;
+    private int uTexLoc;
+    private int texture;
     private final FloatBuffer viewMatrixBuffer;
     private final FloatBuffer projMatrixBuffer;
     private FloatBuffer instanceBuffer;
-    /** Flat-tint texture key: the V1 shader tints and ignores UVs by
-     * decision (hub decisions/GL_INSTANCING_ADAPTER.md) — per-face
-     * sampling plugs its own key here (V2 re-opener, hub
-     * decisions/MATOU_MODEL.md). */
+    /** Shared-texture bucket key: the V2 shader samples the beast texture
+     * and multiplies the tint (hub decisions/MATOU_MODEL.md) — one mesh
+     * and one texture today, per-mob textures plug their own keys here
+     * (named follow-up, never a silent second texture). */
     private static final String TEXTURE_TINT = "tint";
     private static final RenderJob RENDER_JOB = new RenderJob();
     /** Client frame sequence carried by the render snapshot (the job
@@ -150,6 +157,7 @@ public final class InstancedMeshRenderer {
 
         uProjLoc = backend.getUniformLocation(program, "u_projection");
         uViewLoc = backend.getUniformLocation(program, "u_view");
+        uTexLoc = backend.getUniformLocation(program, "u_tex");
 
         vao = backend.genVertexArrays();
         backend.bindVertexArray(vao);
@@ -194,11 +202,33 @@ public final class InstancedMeshRenderer {
         backend.vertexAttribPointer(6, 2, GlBackend.GL_FLOAT, false, instStride, 40);
         backend.vertexAttribDivisor(6, 1);
 
+        // Texture tranche (hub decisions/MATOU_MODEL.md, V2): the beast
+        // texture uploads once, NEAREST + CLAMP_TO_EDGE (MC pixels, no
+        // bleed, no mipmaps — NPOT-safe), on unit 0. A missing or broken
+        // texture refuses here, loudly, before the first frame — an
+        // untextured tint fallback would be a silent pass.
+        BeastTexture beastTex = BeastTexture.cached();
+        texture = backend.genTextures();
+        backend.bindTexture(GlBackend.GL_TEXTURE_2D, texture);
+        backend.texImage2D(GlBackend.GL_TEXTURE_2D, 0, GlBackend.GL_RGBA,
+                beastTex.width(), beastTex.height(), 0,
+                GlBackend.GL_RGBA, GlBackend.GL_UNSIGNED_BYTE,
+                beastTex.uploadBuffer());
+        backend.texParameteri(GlBackend.GL_TEXTURE_2D,
+                GlBackend.GL_TEXTURE_MIN_FILTER, GlBackend.GL_NEAREST);
+        backend.texParameteri(GlBackend.GL_TEXTURE_2D,
+                GlBackend.GL_TEXTURE_MAG_FILTER, GlBackend.GL_NEAREST);
+        backend.texParameteri(GlBackend.GL_TEXTURE_2D,
+                GlBackend.GL_TEXTURE_WRAP_S, GlBackend.GL_CLAMP_TO_EDGE);
+        backend.texParameteri(GlBackend.GL_TEXTURE_2D,
+                GlBackend.GL_TEXTURE_WRAP_T, GlBackend.GL_CLAMP_TO_EDGE);
+
         backend.bindVertexArray(0);
         backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, 0);
         initialized = true;
         System.out.println("[MatouRenderer] ready mesh=" + vertexCount
                 + " verts stride=" + MatouModel.VERTEX_STRIDE
+                + " texture=" + beastTex.width() + "x" + beastTex.height()
                 + " program=" + program);
     }
 
@@ -302,12 +332,14 @@ public final class InstancedMeshRenderer {
         backend.useProgram(program);
         backend.uniformMatrix4fv(uProjLoc, false, projMatrixBuffer);
         backend.uniformMatrix4fv(uViewLoc, false, viewMatrixBuffer);
+        backend.uniform1i(uTexLoc, 0);
 
         backend.bindVertexArray(vao);
         // One instanced draw per planned bucket (the GPU execution
         // order InstanceBucket.plan proves): the buffer is repacked per
         // bucket, so a culled bucket costs nothing and a visible one
-        // binds once.
+        // binds once. The texture binds per bucket beside the repack —
+        // one shared texture today, per-mob textures plug the same call.
         for (Map.Entry<String, List<Integer>> bucket
                 : buckets.entrySet()) {
             instanceBuffer.clear();
@@ -334,6 +366,7 @@ public final class InstancedMeshRenderer {
                         0.0f, 0.0f);
             }
             instanceBuffer.flip();
+            backend.bindTexture(GlBackend.GL_TEXTURE_2D, texture);
             backend.bindBuffer(GlBackend.GL_ARRAY_BUFFER, instanceVbo);
             backend.bufferData(GlBackend.GL_ARRAY_BUFFER, instanceBuffer, GlBackend.GL_STREAM_DRAW);
             // Draw-proof discipline (hub decisions/MATOU_MODEL.md, visual
