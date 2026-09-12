@@ -3,6 +3,7 @@ package fr.iamacat.bridge.model;
 import fr.iamacat.spi.model.MatouAnimation;
 import fr.iamacat.spi.model.Molang;
 import fr.iamacat.spi.model.MatouAnimationParser;
+import java.nio.FloatBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -155,6 +156,42 @@ public final class BeastAnimation {
     public static double interpDistMoved(double prev, double cur,
             double partialTicks) {
         return prev + (cur - prev) * partialTicks;
+    }
+
+    /**
+     * Bone-palette admission (generic-palette tranche, hub
+     * decisions/MATOU_ANIMATION.md): 1..MAX_BONES bones ride the 4xN
+     * RGBA32F bone texture on unit 1, fetched by file-order index.
+     * Anything else refuses loudly at {@code initGl}, before the first
+     * frame — never a silent clamp. Pure — the gate battery covers it
+     * without MC or GL. The ceiling lives here (thin forge call-site),
+     * its value frozen by the tranche, never redefined per bridge.
+     */
+    public static final int MAX_BONES = 8;
+
+    public static int paletteBonesOrThrow(int n) {
+        if (n < 1 || n > MAX_BONES) {
+            throw new IllegalStateException("E_ANIM_SKIN:bones <" + n
+                    + "> (want 1.." + MAX_BONES + " bones on the "
+                    + "bone-texture palette — hub decisions/MATOU_ANIMATION.md)");
+        }
+        return n;
+    }
+
+    /**
+     * Palette pack (generic-palette tranche, hub
+     * decisions/MATOU_ANIMATION.md): one SPI row-major delta as 4 GL
+     * columns appended to the bone-texture staging — texel (column,
+     * bone) holds column {@code c}, so the shader fetches a bone
+     * matrix by file-order index. Transpose once at pack, verbatim
+     * values. Pure — the gate battery covers it without MC or GL.
+     */
+    public static void packPaletteInto(FloatBuffer dst, float[] rowMajor) {
+        for (int c = 0; c < 4; c++) {
+            for (int r = 0; r < 4; r++) {
+                dst.put(rowMajor[r * 4 + c]);
+            }
+        }
     }
 
     /**

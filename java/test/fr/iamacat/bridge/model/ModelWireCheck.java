@@ -10,6 +10,7 @@ import fr.iamacat.spi.hit.Vec3d;
 import fr.iamacat.spi.model.MatouAnimation;
 import fr.iamacat.spi.model.MatouAnimationParser;
 import fr.iamacat.spi.model.MatouModel;
+import fr.iamacat.spi.model.MatouModelParser;
 import fr.iamacat.spi.model.Molang;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -56,6 +57,7 @@ public final class ModelWireCheck {
         testShippedTexture();
         testShippedAnimation();
         testWalkPhaseDriver();
+        testBonePalette();
         testTempRoundtrip();
         testRefusals();
         testCombatReachOverride();
@@ -316,6 +318,59 @@ public final class ModelWireCheck {
         Molang.Ctx zero = new Molang.Ctx(0.0, 0.0, 0.0, 0.05, null);
         check(Math.abs(strutClip.evaluate(0.0, zero).bones.get("head").rotX) < 1e-9,
                 "zero ctx still rests (wiring-only: shipped clip untouched)");
+    }
+
+    /**
+     * Bone-palette battery (generic-palette tranche, hub
+     * decisions/MATOU_ANIMATION.md): admission 1..MAX_BONES past the
+     * old exact-2 guard, pack order (texel (column, bone) holds column
+     * {@code c}), and a 3-bone model serving three deltas — the
+     * shipped 2-bone beast stays admitted. Pure, zero MC.
+     */
+    private static void testBonePalette() {
+        check(BeastAnimation.paletteBonesOrThrow(1) == 1, "one bone admitted");
+        check(BeastAnimation.paletteBonesOrThrow(2) == 2,
+                "shipped two bones admitted");
+        check(BeastAnimation.paletteBonesOrThrow(BeastAnimation.MAX_BONES)
+                == BeastAnimation.MAX_BONES, "ceiling admitted");
+        assertThrows(() -> BeastAnimation.paletteBonesOrThrow(0), "E_ANIM_SKIN:bones");
+        assertThrows(() -> BeastAnimation.paletteBonesOrThrow(
+                BeastAnimation.MAX_BONES + 1), "E_ANIM_SKIN:bones");
+        float[] seq = new float[16];
+        for (int i = 0; i < 16; i++) {
+            seq[i] = i + 1;
+        }
+        java.nio.FloatBuffer staged = java.nio.FloatBuffer.allocate(32);
+        BeastAnimation.packPaletteInto(staged, seq);
+        staged.flip();
+        check(staged.get(0) == 1.0f && staged.get(1) == 5.0f
+                && staged.get(2) == 9.0f && staged.get(3) == 13.0f,
+                "texel (0, bone) holds column 0");
+        check(staged.get(4) == 2.0f && staged.get(8) == 3.0f
+                && staged.get(12) == 4.0f,
+                "texels (1..3, bone) hold columns 1..3");
+        MatouModel triple = MatouModelParser.parse(
+                "{\"format_version\": \"1.12.0\", \"minecraft:geometry\": [{"
+                + "\"description\": {\"identifier\": \"geometry.triple\","
+                + " \"texture_width\": 64, \"texture_height\": 64},"
+                + "\"bones\": ["
+                + "{\"name\": \"body\", \"pivot\": [0, 8, 0],"
+                + " \"cubes\": [{\"origin\": [-8, 0, -8], \"size\": [16, 16, 16],"
+                + " \"uv\": [0, 0]}]},"
+                + "{\"name\": \"head\", \"parent\": \"body\", \"pivot\": [0, 20, 0],"
+                + " \"cubes\": [{\"origin\": [-4, 16, -4], \"size\": [8, 8, 8],"
+                + " \"uv\": [32, 0]}]},"
+                + "{\"name\": \"arm\", \"parent\": \"body\", \"pivot\": [8, 16, 0],"
+                + " \"cubes\": [{\"origin\": [8, 12, -2], \"size\": [4, 8, 4],"
+                + " \"uv\": [40, 16]}]}"
+                + "]}]}");
+        check(BeastAnimation.paletteBonesOrThrow(triple.bones.size()) == 3,
+                "three bones admitted");
+        float[] skinned = triple.bakeSkinnedMesh();
+        check(skinned[2 * 36 * 9 + 8] == 2.0f, "third bone rides index 2");
+        Map<String, float[]> deltas = triple.poseDeltaMatrices(
+                MatouAnimation.AnimPose.identity());
+        check(deltas.size() == 3, "three palette matrices");
     }
 
     private static void testTempRoundtrip() throws Exception {
